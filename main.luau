@@ -150,7 +150,7 @@ function Library:OnRepaint(callback)
 	return callback
 end
 Library.ThemeAlpha = ThemeAlpha
-Library.Version = "2026.09.05-textbox"
+Library.Version = "2026.09.22-native-cards"
 
 function Library:LoadAddon(name)
 	if self.Addons[name] ~= nil then return self.Addons[name] end
@@ -2212,6 +2212,434 @@ function Tab:Section(title, columnIndex)
 		return self:Full(title)
 	end
 	return self:Column(columnIndex):Section(title)
+end
+
+-- Native cards. No window monkey-patches or visibility/animation overrides.
+do
+	local function color(value, fallback)
+		if typeof(value) == "Color3" then return value end
+		return Theme[value or fallback] or Theme[fallback]
+	end
+	local function frame(parent, name)
+		return New("Frame", { Name = name, BackgroundTransparency = 1, BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 0, 0), Parent = parent })
+	end
+	local function base(owner, opts, name)
+		opts = opts or {}
+		local root = frame(owner.Container, name)
+		owner.CardOrder = (owner.CardOrder or 0) + 1
+		root.LayoutOrder = opts.Order or owner.CardOrder
+		root.BackgroundTransparency = opts.Borderless and 1 or 0
+		local corner = Corner(root, opts.CornerRadius or 7)
+		local stroke = Stroke(root, Theme.SectionBorder)
+		stroke.Enabled = not opts.Borderless
+		local api = { Instance = root, Window = owner.Window, Alive = true }
+		local connections, paints = {}, {}
+		local function connect(signal, callback)
+			local c = signal:Connect(callback)
+			table.insert(connections, c)
+			return c
+		end
+		local function paint(callback)
+			table.insert(paints, callback)
+			callback()
+		end
+		paint(function()
+			root.BackgroundColor3 = color(opts.BackgroundColor, "Section")
+			stroke.Color = color(opts.BorderColor, "SectionBorder")
+		end)
+		local hook = Library:OnRepaint(function()
+			if api.Alive then for _, callback in ipairs(paints) do callback() end end
+		end)
+		connect(root.Destroying, function()
+			api.Alive = false
+			for _, c in ipairs(connections) do c:Disconnect() end
+			local index = table.find(Library.RepaintHooks, hook)
+			if index then table.remove(Library.RepaintHooks, index) end
+			table.clear(paints)
+		end)
+		function api:Destroy() if self.Alive then root:Destroy() end end
+		function api:SetVisible(value) root.Visible = value ~= false end
+		function api:SetOrder(value) root.LayoutOrder = value end
+		function api:SetCornerRadius(value) corner.CornerRadius = UDim.new(0, math.max(0, value)) end
+		function api:Refresh() end
+		-- Coalesce scale/size changes after layout settles. Only logical width drives reflow.
+		local pending, lastWidth = false, nil
+		connect(root:GetPropertyChangedSignal("AbsoluteSize"), function()
+			if pending then return end
+			pending = true
+			task.defer(function()
+				pending = false
+				if not api.Alive then return end
+				local width = math.floor(root.AbsoluteSize.X / math.max(owner.Window.Scale.Scale, 0.01) + 0.5)
+				if width > 0 and width ~= lastWidth then
+					lastWidth = width
+					api:Refresh()
+				end
+			end)
+		end)
+		function api:Width()
+			return math.max(1, root.AbsoluteSize.X / math.max(owner.Window.Scale.Scale, 0.01))
+		end
+		return api, root, paint, connect
+	end
+	local function label(parent, value, size, token, paint, changed)
+		local node = Label(parent, tostring(value or ""), color(token, "Text"), size)
+		node.RichText = false
+		node.TextTruncate = Enum.TextTruncate.AtEnd
+		node.Size = UDim2.new(1, 0, 0, size + 6)
+		node.Visible = value ~= nil and value ~= ""
+		local api = { Instance = node }
+		paint(function() if node.Parent then node.TextColor3 = color(token, "Text"); node.Font = Theme.Font end end)
+		function api:SetText(text)
+			node.Text = tostring(text or "")
+			node.Visible = node.Text ~= ""
+			changed()
+		end
+		api.Set = api.SetText
+		function api:SetVisible(state) node.Visible = state ~= false; changed() end
+		function api:SetColor(value) token = value; node.TextColor3 = color(token, "Text") end
+		return api
+	end
+	local function position(node, x, y, w, h)
+		node.Position, node.Size = UDim2.fromOffset(x, y), UDim2.fromOffset(math.max(0, w), math.max(0, h))
+	end
+	local function aligned(width, available, alignment)
+		alignment = string.lower(alignment or "left")
+		if alignment == "fill" then return 0, available end
+		width = math.min(width, available)
+		if alignment == "center" then return (available - width) / 2, width end
+		if alignment == "right" then return available - width, width end
+		return 0, width
+	end
+
+	function Tab:Cards(opts)
+		opts = opts or {}
+		self.Order = self.Order + 1
+		self.CurrentBlock = nil
+		local root = frame(self.Page, "Cards")
+		root.LayoutOrder, root.AutomaticSize = self.Order, Enum.AutomaticSize.Y
+		List(root, opts.Spacing or 9)
+		return setmetatable({ Container = root, Instance = root, Window = self.Window }, { __index = Elements })
+	end
+	-- Tab.Page is already the native scrolling-frame property; do not shadow it with a method.
+
+	function Elements:ProfileCard(opts)
+		opts = opts or {}
+		local api, root, paint, connect = base(self, opts, "ProfileCard")
+		local p, gap = opts.Padding or 14, opts.Spacing or 10
+		local function refresh() if api.Alive then api:Refresh() end end
+		local avatar = New("ImageLabel", { BackgroundTransparency = 1, Image = opts.Image or "",
+			ScaleType = Enum.ScaleType.Crop, Parent = root })
+		local avatarCorner = Corner(avatar, opts.AvatarRadius or 1000)
+		api.Eyebrow = label(root, opts.Eyebrow, 12, opts.EyebrowColor or "TextDim", paint, refresh)
+		api.Title = label(root, opts.Title, 20, opts.TitleColor or "TextBright", paint, refresh)
+		api.Subtitle = label(root, opts.Subtitle, 13, opts.SubtitleColor or "Text", paint, refresh)
+		local badgeOpts = opts.Badge or {}
+		local badge = frame(root, "Badge")
+		badge.Visible = opts.Badge ~= false and badgeOpts.Visible ~= false
+		local pill = frame(badge, "Pill")
+		pill.BackgroundTransparency = 0
+		local pillCorner = Corner(pill, badgeOpts.CornerRadius or 17)
+		local pillStroke = Stroke(pill)
+		local pillText = label(pill, badgeOpts.Text or "Preview", 12, badgeOpts.ContentColor or "AccentSoft", paint, refresh)
+		local pillIcon = AttachIcon(pill, badgeOpts.Icon or "sparkles", Theme.AccentSoft, 16)
+		api.Badge = { Instance = badge }
+		api.Badge.Detail = label(badge, badgeOpts.Detail, 11, badgeOpts.DetailColor or "TextDim", paint, refresh)
+		paint(function()
+			pill.BackgroundColor3 = color(badgeOpts.BackgroundColor, "Group")
+			pillStroke.Color = color(badgeOpts.BorderColor, "Accent")
+			if pillIcon then pillIcon.ImageColor3 = color(badgeOpts.ContentColor, "AccentSoft") end
+		end)
+		function api.Badge:SetText(value) pillText:SetText(value) end
+		function api.Badge:SetDetail(value) self.Detail:SetText(value) end
+		function api.Badge:SetVisible(value) badge.Visible = value ~= false; refresh() end
+		function api.Badge:SetCornerRadius(value) pillCorner.CornerRadius = UDim.new(0, math.max(0, value)) end
+		function api.Badge:SetStyle(values)
+			for key, value in pairs(values) do badgeOpts[key] = value end
+			pill.BackgroundColor3 = color(badgeOpts.BackgroundColor, "Group")
+			pillStroke.Color = color(badgeOpts.BorderColor, "Accent")
+			pillText:SetColor(badgeOpts.ContentColor or "AccentSoft")
+			if pillIcon then pillIcon.ImageColor3 = color(badgeOpts.ContentColor, "AccentSoft") end
+			self.Detail:SetColor(badgeOpts.DetailColor or "TextDim")
+			self:SetCornerRadius(badgeOpts.CornerRadius or 17)
+			refresh()
+		end
+		local privacyOpts = opts.Privacy or {}
+		local privacy = frame(root, "Privacy")
+		privacy.Visible = opts.Privacy ~= false and privacyOpts.Visible ~= false
+		api.Privacy = { Instance = privacy }
+		local identity = { Title = opts.Title or "", Subtitle = opts.Subtitle or "" }
+		local function toggle(caption, initial, callback)
+			local node = New("TextButton", { Text = "", AutoButtonColor = false, BorderSizePixel = 0, Parent = privacy })
+			Corner(node, 5)
+			local title = label(node, caption, 12, "Text", paint, refresh)
+			local track = frame(node, "Switch")
+			track.BackgroundTransparency = 0
+			track.AnchorPoint, track.Position, track.Size = Vector2.new(1, 0.5), UDim2.new(1, -10, 0.5, 0), UDim2.fromOffset(28, 16)
+			Corner(track, 8)
+			local knob = frame(track, "Knob")
+			knob.BackgroundTransparency, knob.Size = 0, UDim2.fromOffset(12, 12)
+			Corner(knob, 6)
+			local control = { Instance = node, State = initial == true }
+			function control:Set(value)
+				self.State = value == true
+				track.BackgroundColor3 = color(self.State and "AccentDim" or "Border", "Border")
+				knob.Position = UDim2.fromOffset(self.State and 14 or 2, 2)
+				callback(self.State)
+			end
+			function control:Get() return self.State end
+			paint(function()
+				node.BackgroundColor3 = Theme.Field
+				track.BackgroundColor3 = color(control.State and "AccentDim" or "Border", "Border")
+				knob.BackgroundColor3 = Theme.TextBright
+			end)
+			connect(node.Activated, function() control:Set(not control.State) end)
+			title.Instance.Size, title.Instance.Position = UDim2.new(1, -52, 1, 0), UDim2.fromOffset(10, 0)
+			control:Set(initial)
+			return control
+		end
+		api.HideName = toggle("Hide name", opts.HideName, function(hidden)
+			api.Title:SetText(hidden and "Hidden user" or identity.Title)
+			api.Subtitle:SetText(hidden and "@hidden" or identity.Subtitle)
+		end)
+		api.HideAvatar = toggle("Hide avatar", opts.HideAvatar, function(hidden) avatar.ImageTransparency = hidden and 1 or 0 end)
+		function api.Privacy:SetVisible(value) privacy.Visible = value ~= false; refresh() end
+		function api.Privacy:SetAlignment(value, compact)
+			privacyOpts[compact and "CompactAlignment" or "Alignment"] = value; refresh()
+		end
+		function api:SetTitle(value) identity.Title = value or ""; self.HideName:Set(self.HideName.State) end
+		function api:SetSubtitle(value) identity.Subtitle = value or ""; self.HideName:Set(self.HideName.State) end
+		function api:SetEyebrow(value) self.Eyebrow:SetText(value) end
+		function api:SetImage(value) avatar.Image = value or "" end
+		function api:SetAvatarRadius(value) avatarCorner.CornerRadius = UDim.new(0, math.max(0, value)) end
+		function api:SetAvatarVisible(value) avatar.Visible = value ~= false; refresh() end
+		function api:Refresh()
+			local w = self:Width()
+			local compact = w < (opts.CompactWidth or 510)
+			local imageSize = opts.AvatarSize or 64
+			local x = avatar.Visible and p + imageSize + 14 or p
+			local rightWidth = not compact and badge.Visible and 142 or 0
+			position(avatar, p, p, imageSize, imageSize)
+			local y = p
+			for _, item in ipairs({self.Eyebrow, self.Title, self.Subtitle}) do
+				if item.Instance.Visible then
+					local h = item.Instance.TextSize + 6
+					position(item.Instance, x, y, w - p - x - rightWidth, h)
+					y = y + h + 2
+				end
+			end
+			local bottom = math.max(p, y - 2, avatar.Visible and p + imageSize or p)
+			if badge.Visible then
+				local bw = math.min(badgeOpts.Width or 128, w - 2 * p)
+				local bx, by = compact and p or w - p - bw, compact and bottom + gap or p
+				position(badge, bx, by, bw, 34)
+				position(pill, 0, 0, bw, 34)
+				position(pillText.Instance, pillIcon and 36 or 10, 0, bw - (pillIcon and 44 or 20), 34)
+				if pillIcon then pillIcon.Position = UDim2.fromOffset(12, 9) end
+				local bh = 34
+				if self.Badge.Detail.Instance.Visible then
+					local offset = badgeOpts.DetailOffset or Vector2.new(0, 0)
+					position(self.Badge.Detail.Instance, offset.X, 38 + offset.Y, bw, 18)
+					local align = string.lower(badgeOpts.DetailAlignment or "right")
+					self.Badge.Detail.Instance.TextXAlignment = align == "left" and Enum.TextXAlignment.Left
+						or (align == "center" and Enum.TextXAlignment.Center or Enum.TextXAlignment.Right)
+					bh = math.max(bh, 56 + offset.Y)
+				end
+				badge.Size = UDim2.fromOffset(bw, bh)
+				bottom = math.max(bottom, by + bh)
+			end
+			if privacy.Visible then
+				local tx, tw = aligned(privacyOpts.Width or 300, w - p * 2,
+					compact and (privacyOpts.CompactAlignment or "Fill") or (privacyOpts.Alignment or "Right"))
+				position(privacy, p + tx, bottom + gap, tw, 32)
+				position(self.HideName.Instance, 0, 0, (tw - 8) / 2, 32)
+				position(self.HideAvatar.Instance, (tw + 8) / 2, 0, (tw - 8) / 2, 32)
+				bottom = bottom + gap + 32
+			end
+			root.Size = UDim2.new(1, 0, 0, bottom + p)
+		end
+		api:Refresh()
+		return api
+	end
+
+	function Elements:MediaCard(opts)
+		opts = opts or {}
+		local api, root, paint, connect = base(self, opts, "MediaCard")
+		local p, gap = opts.Padding or 14, opts.Spacing or 8
+		local function refresh() if api.Alive then api:Refresh() end end
+		api.Title = label(root, opts.Title, 16, "TextBright", paint, refresh)
+		api.Subtitle = label(root, opts.Subtitle, 12, "Text", paint, refresh)
+		api.Description = label(root, opts.Description, 11, "TextDim", paint, refresh)
+		local picture = opts.Icon and AttachIcon(root, opts.Icon, Theme.Accent, opts.ImageSize or 32)
+		local isIcon = picture ~= nil
+		picture = picture or New("ImageLabel", { BackgroundTransparency = 1, Image = opts.Image or "",
+			Visible = opts.Image ~= nil and opts.Image ~= "", ScaleType = Enum.ScaleType.Crop, Parent = root })
+		paint(function() if picture.Parent then picture.ImageColor3 = isIcon and Theme.Accent or Color3.new(1, 1, 1) end end)
+		local pictureCorner = Corner(picture, opts.ImageRadius or 7)
+		local fields, actions = {}, {}
+		api.Fields, api.Actions = {}, {}
+		function api:SetImage(value)
+			isIcon = false
+			picture.ImageRectOffset, picture.ImageRectSize = Vector2.new(0, 0), Vector2.new(0, 0)
+			picture.ImageColor3 = Color3.new(1, 1, 1)
+			picture.Image = value or ""; picture.Visible = picture.Image ~= ""; refresh()
+		end
+		function api:SetImageRadius(value) pictureCorner.CornerRadius = UDim.new(0, math.max(0, value)) end
+		function api:SetTitle(value) self.Title:SetText(value) end
+		function api:SetSubtitle(value) self.Subtitle:SetText(value) end
+		function api:SetDescription(value) self.Description:SetText(value) end
+		function api:AddField(item)
+			assert(item.Id and not self.Fields[item.Id], "Field requires a unique Id")
+			local holder = frame(root, tostring(item.Id))
+			local field = { Instance = holder, Id = item.Id }
+			field.Label = label(holder, item.Label, 11, "TextDim", paint, refresh)
+			field.Value = label(holder, item.Value, 12, "Text", paint, refresh)
+			function field:Set(value) self.Value:SetText(value) end
+			function field:SetVisible(value) holder.Visible = value ~= false; refresh() end
+			table.insert(fields, field); self.Fields[item.Id] = field; refresh()
+			return field
+		end
+		function api:RemoveField(id)
+			local field = self.Fields[id]
+			if not field then return end
+			field.Instance:Destroy()
+			table.remove(fields, table.find(fields, field)); self.Fields[id] = nil; refresh()
+		end
+		function api:SetField(id, value) if self.Fields[id] then self.Fields[id]:Set(value) end end
+		function api:AddAction(item)
+			assert(item.Id and not self.Actions[item.Id], "Action requires a unique Id")
+			local node = New("TextButton", { Text = "", BorderSizePixel = 0, AutoButtonColor = false, Parent = root })
+			Corner(node, 5)
+			local caption = label(node, item.Text, 12, "TextBright", paint, refresh)
+			caption.Instance.Size, caption.Instance.Position = UDim2.new(1, -12, 1, 0), UDim2.fromOffset(6, 0)
+			caption.Instance.TextXAlignment = Enum.TextXAlignment.Center
+			local action = { Instance = node, Id = item.Id, Span = item.Span == 2 and 2 or 1, Enabled = item.Enabled ~= false }
+			paint(function() if node.Parent then node.BackgroundColor3 = Theme.Field end end)
+			function action:SetText(value) caption:SetText(value) end
+			function action:SetEnabled(value)
+				self.Enabled = value ~= false; node.Active = self.Enabled
+				caption.Instance.TextTransparency = self.Enabled and 0 or 0.6
+			end
+			function action:SetVisible(value) node.Visible = value ~= false; refresh() end
+			function action:SetSpan(value) self.Span = value == 2 and 2 or 1; refresh() end
+			action:SetEnabled(action.Enabled)
+			action.Connection = connect(node.Activated, function()
+				if action.Enabled then Library:SafeCallback(item.Text or "card action", item.Callback) end
+			end)
+			table.insert(actions, action); self.Actions[item.Id] = action; refresh()
+			return action
+		end
+		function api:RemoveAction(id)
+			local action = self.Actions[id]
+			if not action then return end
+			action.Connection:Disconnect(); action.Instance:Destroy()
+			table.remove(actions, table.find(actions, action)); self.Actions[id] = nil; refresh()
+		end
+		function api:Refresh()
+			local w = self:Width()
+			local visibleActions = {}
+			for _, action in ipairs(actions) do if action.Instance.Visible then table.insert(visibleActions, action) end end
+			local wide = w >= (opts.CompactWidth or 570) and #visibleActions > 0
+			local aw = wide and math.min(266, (w - 2 * p) * 0.44) or w - 2 * p
+			local iw = w - 2 * p - (wide and aw + 16 or 0)
+			local imageSize = opts.ImageSize or 64
+			position(picture, p, p, imageSize, imageSize)
+			local tx = p + (picture.Visible and imageSize + 14 or 0)
+			local y = p
+			for _, item in ipairs({self.Title, self.Subtitle, self.Description}) do
+				if item.Instance.Visible then
+					local h = item.Instance.TextSize + 6
+					position(item.Instance, tx, y, iw - tx + p, h); y = y + h + 2
+				end
+			end
+			local infoBottom = math.max(p, y - 2, picture.Visible and p + imageSize or p)
+			local n = 0
+			for _, field in ipairs(fields) do
+				if field.Instance.Visible then
+					local fy = infoBottom + gap + math.floor(n / 2) * 42
+					position(field.Instance, p + (n % 2) * (iw + gap) / 2, fy, (iw - gap) / 2, 38)
+					position(field.Label.Instance, 0, 0, (iw - gap) / 2, 18)
+					position(field.Value.Instance, 0, 18, (iw - gap) / 2, 20)
+					n = n + 1
+				end
+			end
+			if n > 0 then infoBottom = infoBottom + gap + math.ceil(n / 2) * 42 - 4 end
+			local ax, ay = wide and w - p - aw or p, wide and p or infoBottom + gap
+			local row, column, actionBottom = 0, 0, p
+			for _, action in ipairs(visibleActions) do
+				if action.Span == 2 and column == 1 then row, column = row + 1, 0 end
+				position(action.Instance, ax + column * (aw + gap) / 2, ay + row * (32 + gap),
+					action.Span == 2 and aw or (aw - gap) / 2, 32)
+				actionBottom = ay + row * (32 + gap) + 32
+				column = column + action.Span
+				if column >= 2 then row, column = row + 1, 0 end
+			end
+			root.Size = UDim2.new(1, 0, 0, math.max(infoBottom, actionBottom) + p)
+		end
+		for _, item in ipairs(opts.Fields or {}) do api:AddField(item) end
+		for _, item in ipairs(opts.Actions or {}) do api:AddAction(item) end
+		api:Refresh()
+		return api
+	end
+
+	function Elements:StatusCard(opts)
+		opts = opts or {}
+		-- A compact media card without actions or metadata.
+		return self:MediaCard({ Title = opts.Title, Description = opts.Description,
+			Image = opts.Image, Icon = opts.Icon, ImageSize = opts.ImageSize or 32, ImageRadius = opts.ImageRadius,
+			Padding = opts.Padding, BackgroundColor = opts.BackgroundColor, BorderColor = opts.BorderColor,
+			CornerRadius = opts.CornerRadius, Borderless = opts.Borderless, Order = opts.Order })
+	end
+
+	function Elements:StatGrid(opts)
+		opts = opts or {}
+		local api, root, paint = base(self, { Borderless = true, Order = opts.Order }, "StatGrid")
+		local items = {}
+		api.Items = {}
+		function api:Add(item)
+			assert(item.Id and not self.Items[item.Id], "Stat requires a unique Id")
+			local cell = frame(root, tostring(item.Id)); cell.BackgroundTransparency = 0
+			Corner(cell, opts.CornerRadius or 7)
+			local border = Stroke(cell)
+			paint(function() if cell.Parent then cell.BackgroundColor3 = Theme.Section; border.Color = Theme.SectionBorder end end)
+			local function refresh() if api.Alive then api:Refresh() end end
+			local entry = { Instance = cell, Id = item.Id }
+			entry.Label = label(cell, item.Label, 12, item.LabelColor or "Text", paint, refresh)
+			entry.Value = label(cell, item.Value or "—", 18, item.ValueColor or "TextBright", paint, refresh)
+			local icon = AttachIcon(cell, item.Icon, Theme.Accent, 16)
+			if icon then icon.Position = UDim2.fromOffset(14, 16); paint(function() if icon.Parent then icon.ImageColor3 = Theme.Accent end end) end
+			entry.Label.Instance.Position = UDim2.fromOffset(icon and 38 or 14, 14)
+			entry.Label.Instance.Size = UDim2.new(1, -(icon and 52 or 28), 0, 20)
+			entry.Value.Instance.Position, entry.Value.Instance.Size = UDim2.fromOffset(14, 38), UDim2.new(1, -28, 0, 24)
+			function entry:Set(value) self.Value:SetText(value) end
+			function entry:SetVisible(value) cell.Visible = value ~= false; refresh() end
+			table.insert(items, entry); self.Items[item.Id] = entry; refresh()
+			return entry
+		end
+		function api:Set(id, value) if self.Items[id] then self.Items[id]:Set(value) end end
+		function api:Remove(id)
+			local item = self.Items[id]; if not item then return end
+			item.Instance:Destroy(); table.remove(items, table.find(items, item)); self.Items[id] = nil; self:Refresh()
+		end
+		function api:Refresh()
+			local w = self:Width()
+			local columns = opts.Columns or (w >= 750 and 6 or (w >= 440 and 3 or 2))
+			columns = math.max(1, math.floor(columns))
+			local gap, h, n = opts.Spacing or 8, 76, 0
+			local cw = math.max(0, (w - gap * (columns - 1)) / columns)
+			for _, item in ipairs(items) do
+				if item.Instance.Visible then
+					position(item.Instance, (n % columns) * (cw + gap), math.floor(n / columns) * (h + gap), cw, h)
+					n = n + 1
+				end
+			end
+			root.Size = UDim2.new(1, 0, 0, n > 0 and math.ceil(n / columns) * (h + gap) - gap or 0)
+		end
+		for _, item in ipairs(opts.Items or opts) do api:Add(item) end
+		api:Refresh()
+		return api
+	end
 end
 
 local Window = {}
