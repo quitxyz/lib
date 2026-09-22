@@ -2431,24 +2431,98 @@ do
 			end
 			local bottom = math.max(p, y - 2, avatar.Visible and p + imageSize or p)
 			if badge.Visible then
-				local bw = math.min(badgeOpts.Width or 128, w - 2 * p)
-				local bx, by = compact and p or w - p - bw, compact and bottom + gap or p
-				position(badge, bx, by, bw, 34)
-				position(pill, 0, 0, bw, 34)
-				position(pillText.Instance, pillIcon and 36 or 10, 0, bw - (pillIcon and 44 or 20), 34)
-				if pillIcon then pillIcon.Position = UDim2.fromOffset(12, 9) end
-				local bh = 34
-				if self.Badge.Detail.Instance.Visible then
-					local offset = badgeOpts.DetailOffset or Vector2.new(0, 0)
-					position(self.Badge.Detail.Instance, offset.X, 38 + offset.Y, bw, 18)
-					local align = string.lower(badgeOpts.DetailAlignment or "right")
-					self.Badge.Detail.Instance.TextXAlignment = align == "left" and Enum.TextXAlignment.Left
-						or (align == "center" and Enum.TextXAlignment.Center or Enum.TextXAlignment.Right)
-					bh = math.max(bh, 56 + offset.Y)
-				end
-				badge.Size = UDim2.fromOffset(bw, bh)
-				bottom = math.max(bottom, by + bh)
-			end
+		    local bw = math.min(badgeOpts.Width or 128, w - 2 * p)
+		    local bh = 34
+		
+		    if self.Badge.Detail.Instance.Visible then
+		        local offset = badgeOpts.DetailOffset or Vector2.new(0, 0)
+		
+		        position(
+		            self.Badge.Detail.Instance,
+		            offset.X,
+		            38 + offset.Y,
+		            bw,
+		            18
+		        )
+		
+		        local detailAlignment =
+		            string.lower(badgeOpts.DetailAlignment or "right")
+		
+		        self.Badge.Detail.Instance.TextXAlignment =
+		            detailAlignment == "left"
+		                and Enum.TextXAlignment.Left
+		            or detailAlignment == "center"
+		                and Enum.TextXAlignment.Center
+		            or Enum.TextXAlignment.Right
+		
+		        bh = math.max(bh, 56 + offset.Y)
+		    end
+		
+		    local bx = compact and p or w - p - bw
+		    local by
+		
+		    if compact then
+		        by = bottom + gap
+		    else
+		        local verticalAlignment =
+		            string.lower(badgeOpts.VerticalAlignment or "top")
+		
+		        if verticalAlignment == "center" then
+		            by = p + ((bottom - p) - bh) / 2
+		        elseif verticalAlignment == "bottom" then
+		            by = bottom - bh
+		        else
+		            by = p
+		        end
+		
+		        by = math.max(p, by)
+		    end
+		
+		    position(badge, bx, by, bw, bh)
+		    position(pill, 0, 0, bw, 34)
+		
+		    local contentAlignment =
+		        string.lower(badgeOpts.ContentAlignment or "left")
+		
+		    local iconWidth = pillIcon and 16 or 0
+		    local iconGap = pillIcon and 8 or 0
+		
+		    local availableTextWidth =
+		        math.max(0, bw - 20 - iconWidth - iconGap)
+		
+		    local textWidth = math.min(
+		        pillText.Instance.TextBounds.X,
+		        availableTextWidth
+		    )
+		
+		    local groupWidth = iconWidth + iconGap + textWidth
+		    local contentX
+		
+		    if contentAlignment == "center" then
+		        contentX = (bw - groupWidth) / 2
+		    elseif contentAlignment == "right" then
+		        contentX = bw - 10 - groupWidth
+		    else
+		        contentX = 12
+		    end
+		
+		    if pillIcon then
+		        pillIcon.Position = UDim2.fromOffset(contentX, 9)
+		    end
+		
+		    position(
+		        pillText.Instance,
+		        contentX + iconWidth + iconGap,
+		        0,
+		        textWidth,
+		        34
+		    )
+		
+		    pillText.Instance.TextXAlignment = Enum.TextXAlignment.Left
+		
+		    badge.Size = UDim2.fromOffset(bw, bh)
+		    bottom = math.max(bottom, by + bh)
+		end
 			if privacy.Visible then
 				local tx, tw = aligned(privacyOpts.Width or 300, w - p * 2,
 					compact and (privacyOpts.CompactAlignment or "Fill") or (privacyOpts.Alignment or "Right"))
