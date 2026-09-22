@@ -2491,10 +2491,25 @@ do
 		    local availableTextWidth =
 		        math.max(0, bw - 20 - iconWidth - iconGap)
 		
-		    local textWidth = math.min(
-		        pillText.Instance.TextBounds.X,
-		        availableTextWidth
-		    )
+		    local iconWidth = pillIcon and 16 or 0
+				local iconGap = pillIcon and 8 or 0
+				
+				local availableTextWidth =
+				    math.max(0, bw - 20 - iconWidth - iconGap)
+				
+				local measuredTextWidth = TextService:GetTextSize(
+				    pillText.Instance.Text,
+				    pillText.Instance.TextSize,
+				    pillText.Instance.Font,
+				    Vector2.new(1000, 34)
+				).X
+				
+				local textWidth = math.min(
+				    measuredTextWidth + 4,
+				    availableTextWidth
+				)
+				
+				local groupWidth = iconWidth + iconGap + textWidth
 		
 		    local groupWidth = iconWidth + iconGap + textWidth
 		    local contentX
