@@ -2560,12 +2560,17 @@ do
 		local function refresh() if api.Alive then api:Refresh() end end
 		api.Title = label(root, opts.Title, 16, "TextBright", paint, refresh)
 		api.Subtitle = label(root, opts.Subtitle, 12, "Text", paint, refresh)
-		api.Description = label(root, opts.Description, 11, "TextDim", paint, refresh)
+		api.Description = label(root, opts.Description, 11, opts.DescriptionColor or "TextDim", paint, refresh)
+		api.Description.Instance.RichText = opts.DescriptionRichText == true
 		local picture = opts.Icon and AttachIcon(root, opts.Icon, Theme.Accent, opts.ImageSize or 32)
 		local isIcon = picture ~= nil
 		picture = picture or New("ImageLabel", { BackgroundTransparency = 1, Image = opts.Image or "",
 			Visible = opts.Image ~= nil and opts.Image ~= "", ScaleType = Enum.ScaleType.Crop, Parent = root })
-		paint(function() if picture.Parent then picture.ImageColor3 = isIcon and Theme.Accent or Color3.new(1, 1, 1) end end)
+		paint(function()
+			if picture.Parent then
+				picture.ImageColor3 = isIcon and color(opts.IconColor or "Accent", "Accent") or Color3.new(1, 1, 1)
+			end
+		end)
 		local pictureCorner = Corner(picture, opts.ImageRadius or 7)
 		local fields, actions = {}, {}
 		api.Fields, api.Actions = {}, {}
@@ -2680,8 +2685,9 @@ do
 		opts = opts or {}
 		-- A compact media card without actions or metadata.
 		return self:MediaCard({ Title = opts.Title, Description = opts.Description,
-			Image = opts.Image, Icon = opts.Icon, CenterImage = opts.CenterImage,
+			Image = opts.Image, Icon = opts.Icon, CenterImage = opts.CenterImage, IconColor = opts.IconColor,
 			ImageSize = opts.ImageSize or 32, ImageRadius = opts.ImageRadius,
+			DescriptionColor = opts.DescriptionColor, DescriptionRichText = opts.DescriptionRichText,
 			Padding = opts.Padding, BackgroundColor = opts.BackgroundColor, BorderColor = opts.BorderColor,
 			CornerRadius = opts.CornerRadius, Borderless = opts.Borderless, Order = opts.Order })
 	end
