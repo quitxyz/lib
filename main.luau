@@ -2666,6 +2666,9 @@ do
 				if column >= 2 then row, column = row + 1, 0 end
 			end
 			root.Size = UDim2.new(1, 0, 0, math.max(infoBottom, actionBottom) + p)
+			if opts.CenterImage and picture.Visible then
+		    position(picture, p, math.floor((root.Size.Y.Offset - imageSize) / 2), imageSize, imageSize)
+			end
 		end
 		for _, item in ipairs(opts.Fields or {}) do api:AddField(item) end
 		for _, item in ipairs(opts.Actions or {}) do api:AddAction(item) end
@@ -2677,7 +2680,8 @@ do
 		opts = opts or {}
 		-- A compact media card without actions or metadata.
 		return self:MediaCard({ Title = opts.Title, Description = opts.Description,
-			Image = opts.Image, Icon = opts.Icon, ImageSize = opts.ImageSize or 32, ImageRadius = opts.ImageRadius,
+			Image = opts.Image, Icon = opts.Icon, CenterImage = opts.CenterImage,
+			ImageSize = opts.ImageSize or 32, ImageRadius = opts.ImageRadius,
 			Padding = opts.Padding, BackgroundColor = opts.BackgroundColor, BorderColor = opts.BorderColor,
 			CornerRadius = opts.CornerRadius, Borderless = opts.Borderless, Order = opts.Order })
 	end
