@@ -3264,6 +3264,7 @@ function Window:Confirm(opts)
 	footerContainer:ButtonRow({
 		{
 			Text = opts.Confirm or "save",
+			Color = opts.ConfirmColor,
 			Callback = function() answer(opts.OnConfirm) end,
 		},
 		{
