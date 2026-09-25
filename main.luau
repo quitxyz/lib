@@ -121,7 +121,7 @@ Library.Defaults = {}
 Library.NotificationsEnabled = true
 Library.NotificationLimit = 5
 Library.Dirty = false
-Library.BaseUrl = "https://raw.githubusercontent.com/FacilityHUB/UI-Facility/refs/heads/main/"
+Library.BaseUrl = "https://raw.githubusercontent.com/quitxyz/lib/refs/heads/main/"
 Library.AddonPaths = {
 	Icons = "addons/Icons.luau",
 	SaveManager = "addons/SaveManager.luau",
@@ -262,13 +262,18 @@ function Library:GetConfig(ignore)
 end
 
 function Library:LoadConfig(data, ignore)
+	if type(data) ~= "table" then return false, "config must be an object" end
+	local errors = {}
 	for flag, value in pairs(data or {}) do
 		local entry = self.Registry[flag]
 		if entry and not (ignore and ignore[flag]) then
-			pcall(entry.Set, value)
+			local ok, err = pcall(entry.Set, value)
+			if not ok then table.insert(errors, tostring(flag) .. ": " .. tostring(err)) end
 		end
 	end
+	if #errors > 0 then return false, table.concat(errors, "; ") end
 	self:ClearDirty()
+	return true
 end
 
 function Library:CaptureDefaults()
@@ -4396,36 +4401,79 @@ FileSystem.Memory = {}
 FileSystem.Native = typeof(writefile) == "function" and typeof(readfile) == "function"
 
 function FileSystem:MakeFolder(path)
-	if not self.Native then return end
-	if typeof(makefolder) == "function" and typeof(isfolder) == "function" then
-		local ok, exists = pcall(isfolder, path)
-		if ok and not exists then pcall(makefolder, path) end
+	if not self.Native then return true, "memory" end
+	if typeof(makefolder) ~= "function" or typeof(isfolder) ~= "function" then
+		return false, "folder functions unavailable"
 	end
+	local ok, exists = pcall(isfolder, path)
+	if not ok then return false, tostring(exists) end
+	if exists then return true, "disk" end
+	local created, err = pcall(makefolder, path)
+	if not created then return false, tostring(err) end
+	local checked, present = pcall(isfolder, path)
+	if not checked or not present then return false, "folder was not created: " .. path end
+	return true, "disk"
+end
+
+function FileSystem:EnsureFolder(path)
+	if type(path) ~= "string" or path == "" or path:find("\\", 1, true)
+		or path:find(":", 1, true) or path:sub(1, 1) == "/" then
+		return false, "invalid relative folder path"
+	end
+	local current = ""
+	for _, part in ipairs(string.split(path, "/")) do
+		if part == "" or part == "." or part == ".." then return false, "invalid folder segment" end
+	end
+	for _, part in ipairs(string.split(path, "/")) do
+		current = current == "" and part or current .. "/" .. part
+		local ok, err = self:MakeFolder(current)
+		if not ok then return false, err end
+	end
+	return true, self.Native and "disk" or "memory"
 end
 
 function FileSystem:Write(path, text)
-	if self.Native and pcall(writefile, path, text) then
+	if self.Native then
+		local ok, err = pcall(writefile, path, text)
+		if not ok then return false, tostring(err) end
 		self.Memory[path] = nil
-		return true
+		return true, "disk"
 	end
 	self.Memory[path] = text
-	return true
+	return true, "memory"
 end
 
 function FileSystem:Read(path)
-	if self.Native and typeof(isfile) == "function" then
+	if self.Memory[path] ~= nil then return self.Memory[path], "memory" end
+	if self.Native then
+		if typeof(isfile) ~= "function" then return nil, "isfile unavailable" end
 		local ok, exists = pcall(isfile, path)
-		if ok and exists then
+		if not ok then return nil, tostring(exists) end
+		if exists then
 			local read, data = pcall(readfile, path)
-			if read then return data end
+			if read then return data, "disk" end
+			return nil, tostring(data)
 		end
 	end
-	return self.Memory[path]
+	return nil, "not found"
 end
 
 function FileSystem:Delete(path)
-	if self.Native and typeof(delfile) == "function" then pcall(delfile, path) end
+	if self.Native then
+		if typeof(isfile) ~= "function" or typeof(delfile) ~= "function" then
+			return false, "file deletion functions unavailable"
+		end
+		local ok, exists = pcall(isfile, path)
+		if not ok then return false, tostring(exists) end
+		if exists then
+			local deleted, err = pcall(delfile, path)
+			if not deleted then return false, tostring(err) end
+			local checked, remains = pcall(isfile, path)
+			if not checked or remains then return false, "file was not deleted" end
+		end
+	end
 	self.Memory[path] = nil
+	return true, self.Native and "disk" or "memory"
 end
 
 function FileSystem:List(folder)

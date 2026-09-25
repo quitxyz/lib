@@ -94,11 +94,19 @@ return function(Library)
 
 	function ThemeManager:SetFolder(folder)
 		self.Folder = folder
-		self.Library:BuildFolders(folder)
+		self.SettingsFolder = nil
+		return self.Library.FileSystem:EnsureFolder(folder .. "/settings")
+	end
+
+	function ThemeManager:SetSettingsFolder(folder)
+		local ok, err = self.Library.FileSystem:EnsureFolder(folder)
+		if not ok then return false, err end
+		self.SettingsFolder = folder
+		return true, err
 	end
 
 	function ThemeManager:Path()
-		return self.Folder .. "/settings/theme.json"
+		return (self.SettingsFolder or self.Folder .. "/settings") .. "/theme.json"
 	end
 
 	function ThemeManager:Names()
@@ -174,8 +182,10 @@ return function(Library)
 				Colors = colors,
 			})
 		end)
-		if ok then self.Library.FileSystem:Write(self:Path(), encoded) end
-		return ok
+		if not ok then return false, tostring(encoded) end
+		local ready, err = self.Library.FileSystem:EnsureFolder(self.SettingsFolder or self.Folder .. "/settings")
+		if not ready then return false, err end
+		return self.Library.FileSystem:Write(self:Path(), encoded)
 	end
 
 	function ThemeManager:Load()
@@ -304,8 +314,11 @@ return function(Library)
 				Confirm = "save",
 				Cancel = "discard",
 				OnConfirm = function()
-					self:Save()
-					dirty = false
+					local ok, result = self:Save()
+					if ok then dirty = false end
+					if not ok or result == "memory" then
+						self.Library:Notify({ Title = "theme", Text = ok and "Theme stored in memory only." or tostring(result) })
+					end
 				end,
 				OnCancel = restoreSnapshot,
 			})

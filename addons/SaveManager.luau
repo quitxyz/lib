@@ -32,49 +32,97 @@ return function(Library)
 
 	function SaveManager:SetFolder(folder)
 		self.Folder = folder
-		self.Library:BuildFolders(folder)
+		self.ConfigFolder = nil
+		self.SettingsFolder = nil
+		local ok, err = FileSystem:EnsureFolder(folder .. "/configs")
+		if not ok then return false, err end
+		return FileSystem:EnsureFolder(folder .. "/settings")
+	end
+
+	function SaveManager:SetConfigFolder(folder)
+		local ok, err = FileSystem:EnsureFolder(folder)
+		if not ok then return false, err end
+		self.ConfigFolder = folder
+		return true, err
+	end
+
+	function SaveManager:SetSettingsFolder(folder)
+		local ok, err = FileSystem:EnsureFolder(folder)
+		if not ok then return false, err end
+		self.SettingsFolder = folder
+		return true, err
+	end
+
+	function SaveManager:ConfigPath()
+		return self.ConfigFolder or self.Folder .. "/configs"
 	end
 
 	function SaveManager:Path(file)
-		return self.Folder .. "/configs/" .. file
+		return self:ConfigPath() .. "/" .. file
 	end
 
 	function SaveManager:List()
-		return FileSystem:List(self.Folder .. "/configs")
+		local files = {}
+		for _, file in ipairs(FileSystem:List(self:ConfigPath())) do
+			if file:sub(-5) == ".json" then table.insert(files, file) end
+		end
+		return files
+	end
+
+	local function filename(name)
+		if type(name) ~= "string" then return nil, "invalid config name" end
+		name = name:match("^%s*(.-)%s*$")
+		if name:sub(-5) == ".json" then name = name:sub(1, -6) end
+		if name == "" or #name > 64 or not name:match("^[%w_%- ]+$") then
+			return nil, "use 1-64 letters, numbers, spaces, underscores or hyphens"
+		end
+		return name .. ".json"
 	end
 
 	function SaveManager:Save(name)
-		if type(name) ~= "string" or string.gsub(name, "%s", "") == "" then return false, "empty name" end
-		local file = name
-		if not string.match(file, "%.%w+$") then file = file .. "." .. self.Format end
+		local file, err = filename(name)
+		if not file then return false, err end
 		local ok, encoded = pcall(function()
 			return HttpService:JSONEncode(self.Library:GetConfig(self.Ignore))
 		end)
 		if not ok then return false, "encode failed" end
-		FileSystem:Write(self:Path(file), encoded)
+		local ready, reason = FileSystem:EnsureFolder(self:ConfigPath())
+		if not ready then return false, reason end
+		local written, storage = FileSystem:Write(self:Path(file), encoded)
+		if not written then return false, storage end
 		self.Library:ClearDirty()
-		return true, file
+		return true, file, storage
 	end
 
 	function SaveManager:Load(file)
-		if type(file) ~= "string" or file == "" then return false, "no config" end
-		local raw = FileSystem:Read(self:Path(file))
-		if not raw then return false, "not found" end
+		local normalized, err = filename(file)
+		if not normalized then return false, err end
+		file = normalized
+		local raw, reason = FileSystem:Read(self:Path(file))
+		if not raw then return false, reason end
 		local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
 		if not ok then return false, "corrupted file" end
-		self.Library:LoadConfig(data, self.Ignore)
+		if type(data) ~= "table" then return false, "config must be an object" end
+		local applied, applyError = self.Library:LoadConfig(data, self.Ignore)
+		if applied == false then return false, applyError end
 		return true, file
 	end
 
 	function SaveManager:Delete(file)
-		if type(file) ~= "string" or file == "" then return false, "no config" end
-		FileSystem:Delete(self:Path(file))
-		if self:GetAutoload() == file then self:ClearAutoload() end
+		local normalized, err = filename(file)
+		if not normalized then return false, err end
+		file = normalized
+		local deleted, reason = FileSystem:Delete(self:Path(file))
+		if not deleted then return false, reason end
+		if self:GetAutoload() == file then
+			local cleared, clearError = self:ClearAutoload()
+			if not cleared then return false, "config deleted; autoload removal failed: " .. tostring(clearError) end
+		end
 		return true, file
 	end
 
 	function SaveManager:AutoloadPath()
-		return self.Folder .. "/settings/autoload.txt"
+		return (self.SettingsFolder or self.ConfigFolder or self.Folder .. "/settings") .. "/autoload.txt"
 	end
 
 	function SaveManager:GetAutoload()
@@ -84,13 +132,18 @@ return function(Library)
 	end
 
 	function SaveManager:SetAutoload(file)
-		if type(file) ~= "string" or file == "" then return false end
-		FileSystem:Write(self:AutoloadPath(), file)
-		return true
+		local normalized, err = filename(file)
+		if not normalized then return false, err end
+		local raw, reason = FileSystem:Read(self:Path(normalized))
+		if not raw then return false, reason end
+		local folder = self.SettingsFolder or self.ConfigFolder or self.Folder .. "/settings"
+		local ready, folderError = FileSystem:EnsureFolder(folder)
+		if not ready then return false, folderError end
+		return FileSystem:Write(self:AutoloadPath(), normalized)
 	end
 
 	function SaveManager:ClearAutoload()
-		FileSystem:Delete(self:AutoloadPath())
+		return FileSystem:Delete(self:AutoloadPath())
 	end
 
 	function SaveManager:LoadAutoloadConfig()
@@ -135,8 +188,9 @@ return function(Library)
 			{
 				Text = "save",
 				Callback = function()
-					local ok, result = self:Save(nameBox:Get())
+					local ok, result, storage = self:Save(nameBox:Get())
 					if ok then refreshList(result) end
+					if ok and storage == "memory" then result = result .. " (memory only)" end
 					notify(ok, result, "saved")
 				end,
 			},
@@ -186,14 +240,17 @@ return function(Library)
 				Callback = function()
 					local file = selected()
 					if not file then return notify(false, "no config", "") end
-					self:SetAutoload(file)
+					local ok, result = self:SetAutoload(file)
+					if not ok then return notify(false, result, "") end
 					autoloadLabel:Set("autoload: " .. file)
+					if result == "memory" then notify(true, "autoload stored in memory only", "updated") end
 				end,
 			},
 			{
 				Text = "clear autoload",
 				Callback = function()
-					self:ClearAutoload()
+					local ok, err = self:ClearAutoload()
+					if not ok then return notify(false, err, "") end
 					autoloadLabel:Set("autoload: none")
 				end,
 			},

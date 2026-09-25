@@ -6,16 +6,17 @@
 local ThemeManager = Library.ThemeManager
 
 ThemeManager:SetLibrary(Library)
-ThemeManager:SetFolder("Facility")
-ThemeManager:BuildThemeSection(Settings, 1)
+ThemeManager:SetSettingsFolder("seized/settings")
+ThemeManager:Load() -- optional, before mounting
+ThemeManager:Mount(Window)
 ```
 
 ## Presets
 
-`rose` (default), `blue`, `green`, `amber`, `violet`, `mono`.
+`facility` (default), `darker`, `typewriter`, `aqua`, `amethyst`, `rose`, `contrast`, `light`.
 
 ```lua
-ThemeManager:Apply("blue")
+ThemeManager:Apply("aqua")
 ThemeManager:Names() -- list of presets
 ```
 
@@ -30,17 +31,26 @@ ThemeManager:SetAccent("#78BEF0")
 
 ## Generated section
 
-`BuildThemeSection` adds a preset dropdown, an accent color picker and a reset button. Its flags `theme_preset` and `theme_accent` are excluded from configurations by `SaveManager:IgnoreThemeSettings()`.
+`Mount` adds a footer paintbrush that opens a modal with a preset dropdown,
+individual theme color pickers and a reset button. Closing after edits prompts
+to save or discard. Its `theme_preset` flag is excluded from configurations by
+`SaveManager:IgnoreThemeSettings()`.
 
 ## Persistence
 
-Nothing is written or read back automatically.
+Call `Load` explicitly to restore saved colors. Saving is available from the
+modal's save/discard prompt; `AutoSave` enables saving during editing.
 
 ```lua
-ThemeManager.AutoSave = true  -- writes <folder>/settings/theme.json on every change
+ThemeManager.AutoSave = true
 ThemeManager:Save()
 ThemeManager:Load()           -- call it explicitly, before building elements
 ```
+
+`SetSettingsFolder("seized/settings")` writes directly to
+`seized/settings/theme.json`. Legacy `SetFolder("seized")` produces the same
+path and clears the explicit override. `Save` returns `ok, storageOrError`,
+where successful storage is `"disk"` or `"memory"`.
 
 ## How it works
 
@@ -51,4 +61,6 @@ Library.Theme.Accent = Color3.fromRGB(255, 120, 80)
 Library:Repaint()
 ```
 
-Limitation: two palette keys holding the exact same RGB value are indexed under a single one. `BorderSoft` and `SectionBorder` are both `46, 46, 50` — changing one without the other will not recolor everything. Harmless as long as you only change the accent.
+Limitation: two palette keys holding the exact same RGB value may be indexed under
+a single key. Components registered through this value-based mapping may then
+follow that key when colors change.
