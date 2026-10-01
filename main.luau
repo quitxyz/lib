@@ -252,16 +252,39 @@ function Library:Register(flag, entry)
 	self.Defaults[flag] = entry.Get()
 end
 
+function Library:OnDirtyChanged(callback)
+    assert(type(callback) == "function", "dirty listener must be a function")
+    self.DirtyListeners = self.DirtyListeners or {}
+    local listeners = self.DirtyListeners
+    local connection = { Connected = true }
+    listeners[connection] = callback
+    function connection:Disconnect()
+        self.Connected = false
+        listeners[self] = nil
+    end
+    return connection
+end
+
+local function EmitDirty(library, state)
+    for connection, callback in pairs(library.DirtyListeners or {}) do
+        task.spawn(function()
+            if connection.Connected then callback(state) end
+        end)
+    end
+end
+
 function Library:MarkDirty(flag)
 	if flag and self.DirtyIgnore and self.DirtyIgnore[flag] then return end
 	if self.Dirty then return end
 	self.Dirty = true
 	if self.OnDirty then task.spawn(self.OnDirty, true) end
+	EmitDirty(self, true)
 end
 
 function Library:ClearDirty()
 	self.Dirty = false
 	if self.OnDirty then task.spawn(self.OnDirty, false) end
+	EmitDirty(self, false)
 end
 
 function Library:GetConfig(ignore)
@@ -4569,6 +4592,7 @@ function Library:Destroy()
 	table.clear(self.RepaintHooks)
 	table.clear(Painted)
 	self.OnDirty = nil
+	for connection in pairs(self.DirtyListeners or {}) do connection:Disconnect() end
 end
 
 local HttpService = game:GetService("HttpService")
