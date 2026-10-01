@@ -88,5 +88,268 @@ return function(Library)
 		return section
 	end
 
+    -- Modern preset. Legacy BuildInterfaceSection remains available.
+    function InterfaceManager:Create(tab, opts)
+        opts = opts or {}
+        local lib = self.Library
+        local window = opts.Window or tab.Window or self:GetWindow()
+        assert(window, "InterfaceManager requires a window")
+        local HttpService = game:GetService("HttpService")
+        local Players = game:GetService("Players")
+        local fs = lib.FileSystem
+        local folder = opts.SettingsFolder or (self.Folder .. "/settings")
+        if opts.ResetFolder then
+            assert(type(opts.ResetFolder) == "string" and opts.ResetFolder:match("^[%w_%-]+$"),
+                "ResetFolder must be a single script-owned root folder")
+        end
+        local ready, reason = fs:EnsureFolder(folder)
+        assert(ready, reason)
+        local path = folder .. "/interface.json"
+        local auto = opts.AutoExecute or {}
+        assert(type(auto) == "table", "AutoExecute must be a table")
+        assert(not (auto.URL and auto.Code), "Provide AutoExecute.URL or Code, not both")
+        assert(auto.URL == nil or (type(auto.URL) == "string" and auto.URL:match("^https://")),
+            "AutoExecute.URL must be an HTTPS URL")
+        assert(auto.Code == nil or type(auto.Code) == "string", "AutoExecute.Code must be a string")
+        local queueTeleport = queue_on_teleport or queueonteleport
+        local loader = auto.Code
+        if auto.URL then
+            loader = ("local source = game:HttpGet(%q)\nlocal chunk, err = loadstring(source)\nassert(chunk, err)\nchunk()"):format(auto.URL)
+        end
+        local canQueue = type(queueTeleport) == "function" and type(loader) == "string" and loader ~= ""
+        local defaults = opts.Defaults or {}
+        local values = {
+            ShowOnLoad = defaults.ShowOnLoad ~= false,
+            AutoExecute = auto.Default == true,
+            Notifications = defaults.Notifications or "right",
+            Scale = defaults.Scale or 100,
+            Opacity = defaults.Opacity or 100,
+            MenuBind = defaults.MenuBind or "RightShift",
+        }
+        local function valid(key, value)
+            if key == "ShowOnLoad" or key == "AutoExecute" then return type(value) == "boolean" end
+            if key == "Notifications" then return value == "right" or value == "none" end
+            if key == "Scale" then return type(value) == "number" and value >= 60 and value <= 140 end
+            if key == "Opacity" then return type(value) == "number" and value >= 20 and value <= 100 end
+            if key == "MenuBind" then return type(value) == "string" end
+            return false
+        end
+        for key, value in pairs(values) do assert(valid(key, value), "Invalid default: " .. key) end
+        local function report(message)
+            if opts.OnError then lib:SafeCallback("interface", opts.OnError, message)
+            else warn("Interface: " .. tostring(message)) end
+        end
+        local raw = fs:Read(path)
+        if raw then
+            local ok, saved = pcall(HttpService.JSONDecode, HttpService, raw)
+            if ok and type(saved) == "table" then
+                for key in pairs(values) do if valid(key, saved[key]) then values[key] = saved[key] end end
+            else report("Could not read saved interface settings; using defaults.") end
+        end
+        local api = { Alive = true, Controls = {}, Settings = values, SettingsPath = path }
+        local show, labels = opts.Controls or {}, opts.Labels or {}
+        local function text(key, fallback) return labels[key] or fallback end
+        local connectionStart, hookStart = #lib.Connections, #lib.RepaintHooks
+        local overlayBefore = {}
+        for _, node in ipairs(window.Overlay:GetChildren()) do overlayBefore[node] = true end
+        local section = tab:Section(opts.Title or "ui & script", opts.Column or 1)
+        api.Section, api.Instance = section, section.Frame
+        local initializing = true
+        function api:Save()
+            local ok, encoded = pcall(HttpService.JSONEncode, HttpService, values)
+            if not ok then return false, encoded end
+            return fs:Write(path, encoded)
+        end
+        local function change(key, value)
+            if not api.Alive or not valid(key, value) then return end
+            if key == "AutoExecute" and value and not canQueue then
+                if api.Controls.AutoExecute then api.Controls.AutoExecute:Set(false, true) end
+                return
+            end
+            values[key] = value
+            if key == "Notifications" then lib.NotificationsEnabled = value ~= "none"
+            elseif key == "Scale" then window:SetUserScale(value / 100)
+            elseif key == "Opacity" then window:SetOpacity(value / 100)
+            elseif key == "MenuBind" then lib:SetToggleKey(value) end
+            -- ShowOnLoad changes the next launch, not the currently visible window.
+            if not initializing then
+                local ok, err = api:Save()
+                if not ok then report("Could not save interface settings: " .. tostring(err)) end
+            end
+        end
+        local function flag(key)
+            local flags = opts.Flags or {}
+            return flags[key] or false
+        end
+        if show.ShowOnLoad ~= false then
+            api.Controls.ShowOnLoad = section:Toggle({
+                Text = text("ShowOnLoad", "show ui on load"), Flag = flag("ShowOnLoad"),
+                Hint = text("ShowOnLoadHint", "show the window when the script starts. applies on the next launch."),
+                Default = values.ShowOnLoad,
+                Callback = function(value) change("ShowOnLoad", value) end,
+            })
+        end
+        if show.AutoExecute ~= false then
+            api.Controls.AutoExecute = section:Toggle({
+                Text = text("AutoExecute", "auto execute"), Flag = flag("AutoExecute"),
+                Hint = text("AutoExecuteHint", canQueue
+                    and "run this script again after teleporting. does not run when roblox first opens."
+                    or "requires a configured script loader and queue teleport support."),
+                Default = canQueue and values.AutoExecute,
+                Callback = function(value) change("AutoExecute", value) end,
+            })
+            api.Controls.AutoExecute:SetEnabled(canQueue)
+        end
+        if show.Notifications ~= false then
+            api.Controls.Notifications = section:Dropdown({
+                Text = text("Notifications", "notifications"), Flag = flag("Notifications"),
+                Options = { "right", "none" }, Default = values.Notifications,
+                Callback = function(value) change("Notifications", value) end,
+            })
+        end
+        for _, key in ipairs({ "Scale", "Opacity" }) do
+            if show[key] ~= false then
+                local selected = key
+                api.Controls[key] = section:Slider({
+                    Text = text(key, key == "Scale" and "ui scale" or "ui opacity"),
+                    Flag = flag(key), Min = key == "Scale" and 60 or 20,
+                    Max = key == "Scale" and 140 or 100, Suffix = "%", Default = values[key],
+                    Callback = function(value) change(selected, value) end,
+                })
+            end
+        end
+        section:Divider()
+        if show.MenuBind ~= false then
+            api.Controls.MenuBind = section:Keybind({
+                Text = text("MenuBind", "menu bind"), Flag = flag("MenuBind"), Default = values.MenuBind,
+                OnChanged = function(value) change("MenuBind", value or "") end,
+            })
+        end
+        if show.Unload ~= false then
+            api.Controls.Unload = section:Button({
+                Text = text("Unload", "unload"), Callback = function() lib:Destroy() end,
+            })
+        end
+        -- No inferred reset scope: callers must name their script-owned root folder.
+        if opts.ResetFolder and show.HardReset ~= false then
+            local resetFolder = opts.ResetFolder
+            assert(type(resetFolder) == "string" and resetFolder:match("^[%w_%-]+$"),
+                "ResetFolder must be a single script-owned root folder")
+            api.Controls.HardReset = section:Button({
+                Text = text("HardReset", "hard reset"), Color = lib.Theme.Danger,
+                Callback = function()
+                    window:Confirm({
+                        Title = text("HardReset", "hard reset"),
+                        Text = text("ResetPrompt", "delete all script settings and configs, then unload?"),
+                        Confirm = text("ResetConfirm", "delete everything"), ConfirmColor = lib.Theme.Danger,
+                        Cancel = text("Cancel", "cancel"),
+                        OnConfirm = function()
+                            local ok, err = pcall(function()
+                                if fs.Native then
+                                    assert(type(isfolder) == "function", "Folder checks unavailable")
+                                    if isfolder(resetFolder) then
+                                        assert(type(delfolder) == "function", "Folder deletion unavailable")
+                                        delfolder(resetFolder)
+                                        assert(not isfolder(resetFolder), "Folder was not deleted")
+                                    end
+                                end
+                                for name in pairs(fs.Memory) do
+                                    if name == resetFolder or name:sub(1, #resetFolder + 1) == resetFolder .. "/" then
+                                        fs.Memory[name] = nil
+                                    end
+                                end
+                            end)
+                            if not ok then report("Hard reset failed: " .. tostring(err)); return end
+                            lib:Destroy()
+                        end,
+                    })
+                end,
+            })
+        end
+        local teleportConnection
+        local queued = false
+        if canQueue then
+            teleportConnection = Players.LocalPlayer.OnTeleport:Connect(function(state)
+                if not api.Alive or not values.AutoExecute or queued then return end
+                if state ~= Enum.TeleportState.Started then return end
+                -- Queue at departure so switching the toggle off beforehand queues nothing.
+                local ok, err = pcall(function()
+                    local prelude = ""
+                    if auto.CarryGlobals then
+                        assert(type(getgenv) == "function", "getgenv unavailable for CarryGlobals")
+                        local carried = {}
+                        for _, name in ipairs(auto.CarryGlobals) do
+                            carried[name] = getgenv()[name]
+                        end
+                        local encoded = HttpService:JSONEncode(carried)
+                        prelude = ("local carried = game:GetService(%q):JSONDecode(%q)\nfor name, value in pairs(carried) do getgenv()[name] = value end\n")
+                            :format("HttpService", encoded)
+                    end
+                    local guard = ""
+                    if fs.Native then
+                        guard = ("local ok, saved = pcall(function() return game:GetService(%q):JSONDecode(readfile(%q)) end)\nif ok and saved.AutoExecute == false then return end\n")
+                            :format("HttpService", path)
+                    end
+                    queueTeleport(guard .. prelude .. loader)
+                end)
+                queued = ok
+                if not ok then report("Auto execute could not be queued: " .. tostring(err)) end
+            end)
+        end
+        -- A successful queue is retained across failed teleports by some executors.
+        -- Do not enqueue duplicates on retry; executor-specific queue retention varies.
+        local connections, hooks, floating, registered = {}, {}, {}, {}
+        for i = connectionStart + 1, #lib.Connections do table.insert(connections, lib.Connections[i]) end
+        for i = hookStart + 1, #lib.RepaintHooks do table.insert(hooks, lib.RepaintHooks[i]) end
+        for _, node in ipairs(window.Overlay:GetChildren()) do
+            if not overlayBefore[node] then table.insert(floating, node) end
+        end
+        for key in pairs(api.Controls) do
+            local name = flag(key)
+            if name then registered[name] = lib.Registry[name] end
+        end
+        function api:Destroy(fromRoot)
+            if not self.Alive then return end
+            self.Alive = false
+            if teleportConnection then teleportConnection:Disconnect() end
+            for _, connection in ipairs(connections) do
+                connection:Disconnect()
+                local index = table.find(lib.Connections, connection)
+                if index then table.remove(lib.Connections, index) end
+            end
+            for _, hook in ipairs(hooks) do
+                local index = table.find(lib.RepaintHooks, hook)
+                if index then table.remove(lib.RepaintHooks, index) end
+            end
+            for name, entry in pairs(registered) do
+                if lib.Registry[name] == entry then lib.Registry[name], lib.Flags[name] = nil, nil end
+            end
+            for i = #(lib.Painted or {}), 1, -1 do
+                local node = lib.Painted[i][1]
+                if node == self.Instance or node:IsDescendantOf(self.Instance) then table.remove(lib.Painted, i) end
+            end
+            for i = #(window.FloatStack or {}), 1, -1 do
+                if table.find(floating, window.FloatStack[i].Frame) then table.remove(window.FloatStack, i) end
+            end
+            for i = #(lib.Painted or {}), 1, -1 do
+                local node = lib.Painted[i][1]
+                for _, root in ipairs(floating) do
+                    if node == root or node:IsDescendantOf(root) then table.remove(lib.Painted, i); break end
+                end
+            end
+            for _, node in ipairs(floating) do node:Destroy() end
+            if not fromRoot then self.Instance:Destroy() end
+        end
+        api.Instance.Destroying:Once(function() api:Destroy(true) end)
+        for _, key in ipairs({ "Notifications", "Scale", "Opacity", "MenuBind" }) do change(key, values[key]) end
+        -- Avoid the window's opening animation when applying the initial visibility.
+        lib.Open = values.ShowOnLoad
+        window.Visible = values.ShowOnLoad
+        window.Main.Visible = values.ShowOnLoad
+        lib:RefreshCursor()
+        initializing = false
+        return api
+    end
+
 	return InterfaceManager
 end
