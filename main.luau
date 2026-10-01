@@ -127,6 +127,7 @@ Library.AddonPaths = {
 	SaveManager = "addons/SaveManager.luau",
 	InterfaceManager = "addons/InterfaceManager.luau",
 	ThemeManager = "addons/ThemeManager.luau",
+	HomeManager = "addons/HomeManager.luau",
 }
 Library.Addons = {}
 Library.Painted = Painted
@@ -149,6 +150,18 @@ end
 function Library:OnRepaint(callback)
 	table.insert(self.RepaintHooks, callback)
 	return callback
+end
+
+function Library:Warn(title, text, duration)
+	return self:Notify({ Title = title, Text = text, Duration = duration, Style = "warning" })
+end
+
+function Library:Error(title, text, duration)
+	return self:Notify({ Title = title, Text = text, Duration = duration, Style = "danger" })
+end
+
+function Library:Success(title, text, duration)
+	return self:Notify({ Title = title, Text = text, Duration = duration, Style = "success" })
 end
 Library.ThemeAlpha = ThemeAlpha
 Library.Version = "2026.09.22-native-cards"
@@ -690,6 +703,7 @@ function Elements:Paragraph(opts)
 end
 
 local function MakeButton(parent, opts, size, order)
+	local connectionStart = #Library.Connections
 	local state = { Enabled = opts.Disabled ~= true }
 	local btn = New("TextButton", {
 		Size = size or UDim2.new(1, 0, 0, 26),
@@ -707,24 +721,45 @@ local function MakeButton(parent, opts, size, order)
 	text.TextXAlignment = Enum.TextXAlignment.Center
 	text.TextTruncate = Enum.TextTruncate.AtEnd
 	text.TextTransparency = state.Enabled and 0 or 0.6
-	Hover(btn, btn, "Field", "FieldHover")
+	Track(btn.MouseEnter:Connect(function()
+		if state.Enabled then Tween(btn, { BackgroundColor3 = Theme.FieldHover }, EASE_FAST) end
+	end))
+	Track(btn.MouseLeave:Connect(function()
+		Tween(btn, { BackgroundColor3 = Theme.Field }, EASE_FAST)
+	end))
 	Track(btn.Activated:Connect(function()
 		if state.Enabled == false then return end
 		Library:SafeCallback(opts.Text or "button", opts.Callback)
 	end))
-	return btn, state, text
-end
-
-function Elements:Button(opts)
-	opts = opts or {}
-	local btn, state, text = MakeButton(self.Container, opts)
 	local api = Disableable({ Instance = btn }, { text })
 	local baseSetEnabled = api.SetEnabled
 	function api:SetEnabled(value)
 		state.Enabled = value ~= false
+		btn.Active = state.Enabled
+		if not state.Enabled then Tween(btn, { BackgroundColor3 = Theme.Field }, EASE_FAST) end
 		return baseSetEnabled(self, value)
 	end
+	function api:SetText(value) text.Text = tostring(value or "") end
+	function api:SetCallback(callback) opts.Callback = callback end
+	function api:SetVisible(value) btn.Visible = value ~= false end
 	if opts.Disabled then api:SetEnabled(false) end
+	local connections = {}
+	for index = connectionStart + 1, #Library.Connections do
+		table.insert(connections, Library.Connections[index])
+	end
+	btn.Destroying:Once(function()
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+			local index = table.find(Library.Connections, connection)
+			if index then table.remove(Library.Connections, index) end
+		end
+		table.clear(connections)
+	end)
+	return btn, state, text, api
+end
+
+function Elements:Button(opts)
+	local _, _, _, api = MakeButton(self.Container, opts or {})
 	return api
 end
 
@@ -737,10 +772,12 @@ function Elements:ButtonRow(list)
 	List(row, 8, Enum.FillDirection.Horizontal)
 	local n = math.max(#list, 1)
 	local buttons = {}
+	local controls = {}
 	for i, opts in ipairs(list) do
-		buttons[i] = MakeButton(row, opts, UDim2.new(1 / n, -(8 * (n - 1)) / n, 1, 0), i)
+		local button, _, _, control = MakeButton(row, opts, UDim2.new(1 / n, -(8 * (n - 1)) / n, 1, 0), i)
+		buttons[i], controls[i] = button, control
 	end
-	return { Instance = row, Buttons = buttons }
+	return { Instance = row, Buttons = buttons, Controls = controls }
 end
 
 function Elements:Split(builders)
@@ -2264,6 +2301,10 @@ do
 			local index = table.find(Library.RepaintHooks, hook)
 			if index then table.remove(Library.RepaintHooks, index) end
 			table.clear(paints)
+			for index = #Painted, 1, -1 do
+				local instance = Painted[index][1]
+				if instance == root or instance:IsDescendantOf(root) then table.remove(Painted, index) end
+			end
 		end)
 		function api:Destroy() if self.Alive then root:Destroy() end end
 		function api:SetVisible(value) root.Visible = value ~= false end
@@ -2318,6 +2359,22 @@ do
 		if alignment == "center" then return (available - width) / 2, width end
 		if alignment == "right" then return available - width, width end
 		return 0, width
+	end
+	local function moveItem(items, item, index, refresh)
+		assert(type(index) == "number" and index == index, "Order must be a number")
+		local current = table.find(items, item)
+		if not current then return end
+		table.remove(items, current)
+		table.insert(items, math.clamp(math.floor(index), 1, #items + 1), item)
+		refresh()
+	end
+
+	function Elements:Cards(opts)
+		opts = opts or {}
+		local root = frame(self.Container, "Cards")
+		root.LayoutOrder, root.AutomaticSize = opts.Order or 0, Enum.AutomaticSize.Y
+		List(root, opts.Spacing or 9)
+		return setmetatable({ Container = root, Instance = root, Window = self.Window }, { __index = Elements })
 	end
 
 	function Tab:Cards(opts)
@@ -2570,16 +2627,21 @@ do
 		api.Description.Instance.RichText = opts.DescriptionRichText == true
 		local picture = opts.Icon and AttachIcon(root, opts.Icon, Theme.Accent, opts.ImageSize or 32)
 		local isIcon = picture ~= nil
+		local iconColor = opts.IconColor or "Accent"
 		picture = picture or New("ImageLabel", { BackgroundTransparency = 1, Image = opts.Image or "",
 			Visible = opts.Image ~= nil and opts.Image ~= "", ScaleType = Enum.ScaleType.Crop, Parent = root })
 		paint(function()
 			if picture.Parent then
-				picture.ImageColor3 = isIcon and color(opts.IconColor or "Accent", "Accent") or Color3.new(1, 1, 1)
+				picture.ImageColor3 = isIcon and color(iconColor, "Accent") or Color3.new(1, 1, 1)
 			end
 		end)
 		local pictureCorner = Corner(picture, opts.ImageRadius or 7)
 		local fields, actions = {}, {}
 		api.Fields, api.Actions = {}, {}
+		function api:SetIconColor(value)
+			iconColor = value
+			if isIcon then picture.ImageColor3 = color(value, "Accent") end
+		end
 		function api:SetImage(value)
 			isIcon = false
 			picture.ImageRectOffset, picture.ImageRectSize = Vector2.new(0, 0), Vector2.new(0, 0)
@@ -2598,6 +2660,7 @@ do
 			field.Value = label(holder, item.Value, 12, "Text", paint, refresh)
 			function field:Set(value) self.Value:SetText(value) end
 			function field:SetVisible(value) holder.Visible = value ~= false; refresh() end
+			function field:SetOrder(value) moveItem(fields, self, value, refresh) end
 			table.insert(fields, field); self.Fields[item.Id] = field; refresh()
 			return field
 		end
@@ -2630,6 +2693,8 @@ do
 				Tween(node, { BackgroundColor3 = Theme.Field }, EASE_FAST)
 			end)
 			function action:SetText(value) caption:SetText(value) end
+			function action:SetCallback(callback) item.Callback = callback end
+			function action:SetOrder(value) moveItem(actions, self, value, refresh) end
 			function action:SetEnabled(value)
 				self.Enabled = value ~= false; node.Active = self.Enabled
 				if not self.Enabled then
@@ -2736,6 +2801,7 @@ do
 			entry.Value.Instance.Position, entry.Value.Instance.Size = UDim2.fromOffset(14, 38), UDim2.new(1, -28, 0, 24)
 			function entry:Set(value) self.Value:SetText(value) end
 			function entry:SetVisible(value) cell.Visible = value ~= false; refresh() end
+			function entry:SetOrder(value) moveItem(items, self, value, refresh) end
 			table.insert(items, entry); self.Items[item.Id] = entry; refresh()
 			return entry
 		end
@@ -2837,6 +2903,7 @@ function Window:ToggleFloating(panel, anchor, matchWidth)
 end
 
 function Window:Tab(name, icon)
+	local connectionStart = #Library.Connections
 	local opts = type(name) == "table" and name or { Title = name, Icon = icon }
 	local title = opts.Title or opts.Text or "tab"
 
@@ -2916,7 +2983,7 @@ function Window:Tab(name, icon)
 
 	table.insert(self.Tabs, tab)
 
-	Library:OnRepaint(function()
+	local repaintHook = Library:OnRepaint(function()
 		tab:SetActive(self.ActiveTab == tab, false)
 	end)
 
@@ -2939,6 +3006,32 @@ function Window:Tab(name, icon)
 		self:CloseFloating()
 	end))
 
+	local connections = {}
+	for index = connectionStart + 1, #Library.Connections do
+		table.insert(connections, Library.Connections[index])
+	end
+	tab.Alive = true
+	function tab:Destroy(fromPage)
+		if not self.Alive then return end
+		self.Alive = false
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+			local index = table.find(Library.Connections, connection)
+			if index then table.remove(Library.Connections, index) end
+		end
+		table.clear(connections)
+		local index = table.find(Library.RepaintHooks, repaintHook)
+		if index then table.remove(Library.RepaintHooks, index) end
+		index = table.find(self.Window.Tabs, self)
+		if index then table.remove(self.Window.Tabs, index) end
+		if self.Window.ActiveTab == self then
+			self.Window.ActiveTab = nil
+			if not Library.Destroying and self.Window.Tabs[1] then self.Window:SetTab(self.Window.Tabs[1]) end
+		end
+		button:Destroy()
+		if not fromPage then page:Destroy() end
+	end
+	page.Destroying:Once(function() tab:Destroy(true) end)
 	if not self.ActiveTab then self:SetTab(tab) end
 	return tab
 end
@@ -4444,6 +4537,7 @@ Track(UserInputService.InputBegan:Connect(function(input, gpe)
 end))
 
 function Library:Destroy()
+	self.Destroying = true
 	for _, window in ipairs(self.Windows) do
 		for index = #(window.Modals or {}), 1, -1 do window.Modals[index]:Destroy() end
 	end
@@ -4466,6 +4560,9 @@ function Library:Destroy()
 	table.clear(self.HotkeyEntries)
 	table.clear(self.Registry)
 	table.clear(self.Flags)
+	table.clear(self.RepaintHooks)
+	table.clear(Painted)
+	self.OnDirty = nil
 end
 
 local HttpService = game:GetService("HttpService")

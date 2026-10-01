@@ -231,9 +231,9 @@ Cells are 76 px tall. An empty grid has zero height.
   container width. Scale-only frames with unchanged logical width are skipped.
 - Text sizes are fixed; text is single-line and truncated rather than auto-scaled.
 - Hidden profile lines, badge, controls, media lines, fields, and actions reflow.
-- Reorder whole cards with SetOrder; reorder fields/actions by removing and re-adding.
+- Reorder whole cards with `SetOrder`. Fields, actions, and stat items also expose `SetOrder(index)` to move within their list.
+- Media actions expose `SetCallback(callback)`; MediaCard/StatusCard expose `SetIconColor(colorOrThemeKey)`.
+- `section:Cards(options)` creates a cards container within an existing section.
 - Named layout presets, arbitrary child slots, drag-and-drop ordering, target/HP
   cards, console, and watermark are **not included** in this update.
-- This is a native API implementation, not a converted Home showcase. The existing
-  test Lua remains unchanged. Confirm rendering and toggle animation in Roblox
-  before treating the migration as visually complete.
+- [HomeManager](home-manager.md) provides the optional ready-made Home layout using these components. Confirm rendering and toggle animation in Roblox when changing layouts.

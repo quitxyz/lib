@@ -69,6 +69,9 @@ local clicks=0
 local row=container:ButtonRow({{Text='disabled',Disabled=true,Callback=function() clicks=clicks+1 end},{Text='enabled',Callback=function() clicks=clicks+1 end}})
 row.Buttons[1].Activated:Fire(); row.Buttons[2].Activated:Fire(); flush()
 assert(clicks==1)
+row.Controls[1]:SetEnabled(true); row.Controls[1]:SetText('enabled now')
+row.Controls[1].Instance.Activated:Fire(); flush(); assert(clicks==2)
+row.Controls[1]:SetEnabled(false); row.Buttons[1].Activated:Fire(); flush(); assert(clicks==2)
 for _,n in ipairs(nodes) do if n.Parent==row.Buttons[1] and n.ClassName=='TextLabel' then assert(n.TextTransparency==0.6) end end
 local window=setmetatable({Main=New('Frame'),CloseFloating=function() end},{__index=Window})
 local panel=window:Modal({}); panel:SetOpen(true); panel:SetOpen(false); panel:SetOpen(true); finish()
@@ -111,3 +114,35 @@ assert(clicks==0 and action.Instance.BackgroundColor3==Theme.Field)
 action:SetEnabled(true); action.Instance.Activated:Fire(); flush(); assert(clicks==1)
 ''')
 print('PASS: row disabled clicks, modal lifecycle/blur/subscriptions, confirm/dismiss once, Home action hover and disabled state')
+
+lua.execute('''
+Tab={}; Tab.__index=Tab
+function Library:OnRepaint(f) self.RepaintHooks[#self.RepaintHooks+1]=f; return f end
+Theme.TextSize=12
+Enum.AutomaticSize.X=2; Enum.AutomaticSize.None=0
+Enum.VerticalAlignment={Center=1}
+Enum.SortOrder={LayoutOrder=1}
+TweenInfo={new=function() return {} end}
+function List() return {} end
+function AttachIcon() return nil end
+local originalNew=New
+function New(class,props)
+ local n=originalNew(class,props)
+ function n:GetPropertyChangedSignal() return signal() end
+ return n
+end
+function Window:NextTabOrder() return #self.Tabs+1 end
+function Window:SetTab(tab) self.ActiveTab=tab end
+''')
+lua.execute(source[source.index('function Window:Tab('):source.index('function Window:NextTabOrder')])
+lua.execute('''
+local window=setmetatable({Body=New('Frame'),TabBar=New('Frame'),Tabs={},CloseFloating=function() end},{__index=Window})
+local baseline=#Library.Connections
+local hooks=#Library.RepaintHooks
+local a=window:Tab('a'); local b=window:Tab('b')
+assert(window.ActiveTab==a)
+a:Destroy(); assert(window.ActiveTab==b and #window.Tabs==1)
+b.Page:Destroy(); assert(window.ActiveTab==nil and #window.Tabs==0)
+a:Destroy(); assert(#Library.Connections==baseline and #Library.RepaintHooks==hooks)
+''')
+print('PASS: tab destruction, selection fallback and subscription cleanup')

@@ -21,6 +21,8 @@
 
 ## Systems
 
+* [Home manager](home-manager.md)
+
 * [Notifications](notifications.md)
 * [Configurations](save-manager.md)
 * [Interface manager](interface-manager.md)

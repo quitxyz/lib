@@ -88,17 +88,5 @@ return function(Library)
 		return section
 	end
 
-	function Library:Warn(title, text, duration)
-		return self:Notify({ Title = title, Text = text, Duration = duration, Style = "warning" })
-	end
-
-	function Library:Error(title, text, duration)
-		return self:Notify({ Title = title, Text = text, Duration = duration, Style = "danger" })
-	end
-
-	function Library:Success(title, text, duration)
-		return self:Notify({ Title = title, Text = text, Duration = duration, Style = "success" })
-	end
-
 	return InterfaceManager
 end

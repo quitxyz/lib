@@ -24,7 +24,15 @@ section:ButtonRow({
 })
 ```
 
-Returns `{ Instance, Buttons }`, where `Buttons` holds the `TextButton` instances in the order given.
+Returns `{ Instance, Buttons, Controls }`. `Buttons` retains the raw `TextButton` instances for compatibility. `Controls` contains the corresponding APIs with `SetEnabled`, `SetDisabled`, `SetText`, `SetCallback`, and `SetVisible`, also available on standalone buttons.
+
+```lua
+row.Controls[1]:SetEnabled(false)
+row.Controls[2]:SetText("load selected")
+row.Controls[2]:SetCallback(function() end)
+```
+
+Disabled buttons ignore activation and hover feedback. Hiding a row button retains its original allocated width; it does not redistribute the other buttons.
 
 ## Footer action
 
