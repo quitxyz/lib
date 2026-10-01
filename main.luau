@@ -128,6 +128,7 @@ Library.AddonPaths = {
 	InterfaceManager = "addons/InterfaceManager.luau",
 	ThemeManager = "addons/ThemeManager.luau",
 	HomeManager = "addons/HomeManager.luau",
+	ConsoleManager = "addons/ConsoleManager.luau",
 }
 Library.Addons = {}
 Library.Painted = Painted
