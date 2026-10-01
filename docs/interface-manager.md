@@ -31,7 +31,7 @@ Replace the example URL with your published script's loader. It must load your s
 - **ui opacity**: 20–100%.
 - **menu bind**: defaults to RightShift.
 - **unload**: unloads immediately.
-- **reset**: opens a choice panel. **reset interface** restores creation defaults (always disabling auto execute) and saves them without deleting themes or game configs. Changes apply immediately except show-on-load, which applies next launch. **delete everything** is only included when `ResetFolder` names a script-owned root folder. Asks for confirmation, uses the theme danger color, deletes that folder and its memory fallback entries, then unloads. A deletion failure keeps the UI running.
+- **reset**: uses the theme danger color and opens a two-button prompt: red **delete everything** on the left, **reset interface** on the right. Closing the prompt with its X performs neither action. **reset interface** restores creation defaults (always disabling auto execute) and saves them without deleting themes or game configs. Changes apply immediately except show-on-load, which applies next launch. **delete everything** is only included when `ResetFolder` names a script-owned root folder. Selecting it in this prompt confirms deletion, uses the theme danger color, deletes that folder and its memory fallback entries, then unloads. A deletion failure keeps the UI running.
 
 Keybind menu and watermark controls are deferred.
 
@@ -60,7 +60,7 @@ local interface = Library.InterfaceManager:Create(settingsTab, {
 
 Control keys are `ShowOnLoad`, `AutoExecute`, `Notifications`, `Scale`, `Opacity`, `MenuBind`, `Unload`, and `Reset` (`HardReset = false` remains accepted). Labels use the same keys, plus `ShowOnLoadHint`, `AutoExecuteHint`, `ResetPrompt`, `ResetConfirm`, `Reset`, `ResetHelp`, `ResetInterface`, and `Cancel`.
 
-Returned handles: `Section`, `Instance`, `Controls`, `Settings`, `SettingsPath`, and `Alive`. Controls retain their ordinary component methods. `ResetInterface()` restores and saves interface defaults; it returns success and storage mode/error. `ResetModal` exposes the reset choice panel. `Save()` returns success and storage mode/error; `Destroy()` removes this section and its listeners. Unloading or destroying its parent cleans up automatically.
+Returned handles: `Section`, `Instance`, `Controls`, `Settings`, `SettingsPath`, and `Alive`. Controls retain their ordinary component methods. `ResetInterface()` restores and saves interface defaults; it returns success and storage mode/error. `Save()` returns success and storage mode/error; `Destroy()` removes this section and its listeners. Unloading or destroying its parent cleans up automatically.
 
 ## Auto execute
 

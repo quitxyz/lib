@@ -250,59 +250,49 @@ return function(Library)
             if not ok then report("Interface reset could not be saved: " .. tostring(result)) end
             return ok, result
         end
-        local resetModal
         if show.Reset ~= false and show.HardReset ~= false then
-            resetModal = window:Modal({ Title = text("Reset", "reset"), Width = 330, Height = 220 })
-            api.ResetModal = resetModal
-            resetModal.Content:Label(text("ResetHelp", "reset interface preferences or delete all script files."))
-            resetModal.Content:Button({
-                Text = text("ResetInterface", "reset interface"),
-                Callback = function()
-                    local ok = api:ResetInterface()
-                    if ok then resetModal:SetOpen(false) end
-                end,
-            })
-            if opts.ResetFolder then
-                local resetFolder = opts.ResetFolder
-                resetModal.Content:Button({
-                    Text = text("ResetConfirm", "delete everything"), Color = lib.Theme.Danger,
-                    Callback = function()
-                        resetModal:SetOpen(false)
-                        window:Confirm({
-                            Title = text("HardReset", "hard reset"),
-                            Text = text("ResetPrompt", "delete all script settings and configs, then unload?"),
-                            Confirm = text("ResetConfirm", "delete everything"), ConfirmColor = lib.Theme.Danger,
-                            Cancel = text("Cancel", "cancel"),
-                            OnConfirm = function()
-                                local ok, err = pcall(function()
-                                    if fs.Native then
-                                        assert(type(isfolder) == "function", "Folder checks unavailable")
-                                        if isfolder(resetFolder) then
-                                            assert(type(delfolder) == "function", "Folder deletion unavailable")
-                                            delfolder(resetFolder)
-                                            assert(not isfolder(resetFolder), "Folder was not deleted")
-                                        end
-                                    end
-                                    for name in pairs(fs.Memory) do
-                                        if name == resetFolder or name:sub(1, #resetFolder + 1) == resetFolder .. "/" then
-                                            fs.Memory[name] = nil
-                                        end
-                                    end
-                                end)
-                                if not ok then report("Hard reset failed: " .. tostring(err)); return end
-                                lib:Destroy()
-                            end,
-                        })
-                    end,
-                })
-            end
-            resetModal.Content:Button({
-                Text = text("Cancel", "cancel"),
-                Callback = function() resetModal:SetOpen(false) end,
-            })
             api.Controls.Reset = section:Button({
-                Text = text("Reset", "reset"),
-                Callback = function() resetModal:SetOpen(true) end,
+                Text = text("Reset", "reset"), Color = lib.Theme.Danger,
+                Callback = function()
+                    if not opts.ResetFolder then
+                        window:Confirm({
+                            Title = text("Reset", "reset"),
+                            Text = text("ResetHelp", "restore interface preferences to their defaults?"),
+                            Confirm = text("ResetInterface", "reset interface"),
+                            Cancel = text("Cancel", "cancel"),
+                            OnConfirm = function() api:ResetInterface() end,
+                        })
+                        return
+                    end
+                    local resetFolder = opts.ResetFolder
+                    window:Confirm({
+                        Title = text("Reset", "reset"),
+                        Text = text("ResetHelp", "delete all script files and unload, or reset only interface preferences?"),
+                        Confirm = text("ResetConfirm", "delete everything"),
+                        ConfirmColor = lib.Theme.Danger,
+                        Cancel = text("ResetInterface", "reset interface"),
+                        OnCancel = function() api:ResetInterface() end,
+                        OnConfirm = function()
+                    local ok, err = pcall(function()
+                        if fs.Native then
+                            assert(type(isfolder) == "function", "Folder checks unavailable")
+                            if isfolder(resetFolder) then
+                                assert(type(delfolder) == "function", "Folder deletion unavailable")
+                                delfolder(resetFolder)
+                                assert(not isfolder(resetFolder), "Folder was not deleted")
+                            end
+                        end
+                        for name in pairs(fs.Memory) do
+                            if name == resetFolder or name:sub(1, #resetFolder + 1) == resetFolder .. "/" then
+                                fs.Memory[name] = nil
+                            end
+                        end
+                    end)
+                    if not ok then report("Hard reset failed: " .. tostring(err)); return end
+                    lib:Destroy()
+                        end,
+                    })
+                end,
             })
             api.Controls.HardReset = api.Controls.Reset -- legacy handle
         end
@@ -352,7 +342,6 @@ return function(Library)
             if not self.Alive then return end
             self.Alive = false
             if teleportConnection then teleportConnection:Disconnect() end
-            if resetModal then resetModal:Destroy() end
             for _, connection in ipairs(connections) do
                 connection:Disconnect()
                 local index = table.find(lib.Connections, connection)
