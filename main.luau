@@ -690,7 +690,7 @@ function Elements:Paragraph(opts)
 end
 
 local function MakeButton(parent, opts, size, order)
-	local state = { Enabled = true }
+	local state = { Enabled = opts.Disabled ~= true }
 	local btn = New("TextButton", {
 		Size = size or UDim2.new(1, 0, 0, 26),
 		BackgroundColor3 = Theme.Field,
@@ -706,6 +706,7 @@ local function MakeButton(parent, opts, size, order)
 	text.Size = UDim2.fromScale(1, 1)
 	text.TextXAlignment = Enum.TextXAlignment.Center
 	text.TextTruncate = Enum.TextTruncate.AtEnd
+	text.TextTransparency = state.Enabled and 0 or 0.6
 	Hover(btn, btn, "Field", "FieldHover")
 	Track(btn.Activated:Connect(function()
 		if state.Enabled == false then return end
@@ -2614,11 +2615,27 @@ do
 			local caption = label(node, item.Text, 12, "TextBright", paint, refresh)
 			caption.Instance.Size, caption.Instance.Position = UDim2.new(1, -12, 1, 0), UDim2.fromOffset(6, 0)
 			caption.Instance.TextXAlignment = Enum.TextXAlignment.Center
-			local action = { Instance = node, Id = item.Id, Span = item.Span == 2 and 2 or 1, Enabled = item.Enabled ~= false }
-			paint(function() if node.Parent then node.BackgroundColor3 = Theme.Field end end)
+			local action = { Instance = node, Id = item.Id, Span = item.Span == 2 and 2 or 1, Enabled = item.Enabled ~= false and item.Disabled ~= true }
+			local hovered = false
+			paint(function()
+				if node.Parent then node.BackgroundColor3 = hovered and Theme.FieldHover or Theme.Field end
+			end)
+			connect(node.MouseEnter, function()
+				if not action.Enabled then return end
+				hovered = true
+				Tween(node, { BackgroundColor3 = Theme.FieldHover }, EASE_FAST)
+			end)
+			connect(node.MouseLeave, function()
+				hovered = false
+				Tween(node, { BackgroundColor3 = Theme.Field }, EASE_FAST)
+			end)
 			function action:SetText(value) caption:SetText(value) end
 			function action:SetEnabled(value)
 				self.Enabled = value ~= false; node.Active = self.Enabled
+				if not self.Enabled then
+					hovered = false
+					Tween(node, { BackgroundColor3 = Theme.Field }, EASE_FAST)
+				end
 				caption.Instance.TextTransparency = self.Enabled and 0 or 0.6
 			end
 			function action:SetVisible(value) node.Visible = value ~= false; refresh() end
@@ -3165,7 +3182,44 @@ function Window:Modal(opts)
 		Scroller = scroller,
 		Content = NewContainer(self, scroller),
 		Open = false,
+		Alive = true,
+		Connections = {},
+		RepaintHooks = {},
 	}
+	local blurs = {}
+	local closeVersion = 0
+	local function connect(signal, callback)
+		local connection = signal:Connect(callback)
+		table.insert(api.Connections, connection)
+		return connection
+	end
+
+	function api:Destroy(fromRoot)
+		if not self.Alive then return end
+		self.Alive, self.Open = false, false
+		for _, connection in ipairs(self.Connections) do
+			connection:Disconnect()
+			local index = table.find(Library.Connections, connection)
+			if index then table.remove(Library.Connections, index) end
+		end
+		table.clear(self.Connections)
+		for _, hook in ipairs(self.RepaintHooks) do
+			local index = table.find(Library.RepaintHooks, hook)
+			if index then table.remove(Library.RepaintHooks, index) end
+		end
+		table.clear(self.RepaintHooks)
+		for blur in pairs(blurs) do blur:Destroy() end
+		table.clear(blurs)
+		self.Blur = nil
+		for index = #Painted, 1, -1 do
+			local instance = Painted[index][1]
+			if instance == root or instance:IsDescendantOf(root) then table.remove(Painted, index) end
+		end
+		local index = table.find(window.Modals or {}, self)
+		if index then table.remove(window.Modals, index) end
+		if not fromRoot then root:Destroy() end
+	end
+	root.Destroying:Once(function() api:Destroy(true) end)
 
 	local function setBlur(state)
 		if state then
@@ -3176,6 +3230,7 @@ function Window:Modal(opts)
 				blur.Size = 0
 				blur.Parent = Lighting
 				api.Blur = blur
+				blurs[blur] = true
 				Tween(blur, { Size = opts.Blur or 16 })
 			end)
 		elseif api.Blur then
@@ -3184,13 +3239,16 @@ function Window:Modal(opts)
 			pcall(function()
 				Tween(blur, { Size = 0 }).Completed:Once(function()
 					blur:Destroy()
+					blurs[blur] = nil
 				end)
 			end)
 		end
 	end
 
 	function api:SetOpen(state)
-		if state == self.Open then return end
+		if not self.Alive or state == self.Open then return end
+		closeVersion += 1
+		local version = closeVersion
 		self.Open = state
 		if state then
 			window:CloseFloating()
@@ -3204,7 +3262,9 @@ function Window:Modal(opts)
 			window:CloseFloating()
 			Tween(scrim, { BackgroundTransparency = 1 })
 			Tween(cardScale, { Scale = 0.96 }).Completed:Once(function()
-				if not api.Open then root.Visible = false end
+				if not api.Alive or api.Open or version ~= closeVersion then return end
+				root.Visible = false
+				if opts.DestroyOnClose then api:Destroy() end
 			end)
 			setBlur(false)
 			if api.OnClose then task.spawn(api.OnClose) end
@@ -3215,19 +3275,19 @@ function Window:Modal(opts)
 		self:SetOpen(not self.Open)
 	end
 
-	Track(scrim.Activated:Connect(function() api:SetOpen(false) end))
-	Track(close.Activated:Connect(function() api:SetOpen(false) end))
-	Track(close.MouseEnter:Connect(function()
+	connect(scrim.Activated, function() api:SetOpen(false) end)
+	connect(close.Activated, function() api:SetOpen(false) end)
+	connect(close.MouseEnter, function()
 		for _, bar in ipairs(closeBars) do Tween(bar, { BackgroundColor3 = Theme.Danger }, EASE_FAST) end
-	end))
-	Track(close.MouseLeave:Connect(function()
+	end)
+	connect(close.MouseLeave, function()
 		for _, bar in ipairs(closeBars) do Tween(bar, { BackgroundColor3 = Theme.TextDim }, EASE_FAST) end
-	end))
-	Track(UserInputService.InputBegan:Connect(function(input, gpe)
+	end)
+	connect(UserInputService.InputBegan, function(input, gpe)
 		if not gpe and api.Open and input.KeyCode == Enum.KeyCode.Escape then
 			api:SetOpen(false)
 		end
-	end))
+	end)
 
 	self.Modals = self.Modals or {}
 	table.insert(self.Modals, api)
@@ -3236,6 +3296,8 @@ end
 
 function Window:Confirm(opts)
 	opts = opts or {}
+	local connectionStart = #Library.Connections
+	local repaintStart = #Library.RepaintHooks
 
 	local modal = self:Modal({
 		Title = opts.Title or "confirm",
@@ -3243,6 +3305,7 @@ function Window:Confirm(opts)
 		Height = opts.Height or 150,
 		Dim = opts.Dim or 0.45,
 		Blur = opts.Blur or 10,
+		DestroyOnClose = true,
 	})
 
 	local content = modal.Content
@@ -3252,6 +3315,7 @@ function Window:Confirm(opts)
 
 	local answered = false
 	local function answer(callback)
+		if answered or not modal.Open then return end
 		answered = true
 		modal:SetOpen(false)
 		Library:SafeCallback("action", callback)
@@ -3280,7 +3344,14 @@ function Window:Confirm(opts)
 
 	modal.OnClose = function()
 		if not answered and opts.OnDismiss then task.spawn(opts.OnDismiss) end
-		answered = false
+		answered = true
+	end
+	-- Prompt controls are built synchronously; release their subscriptions with the modal.
+	for index = connectionStart + 1, #Library.Connections do
+		table.insert(modal.Connections, Library.Connections[index])
+	end
+	for index = repaintStart + 1, #Library.RepaintHooks do
+		table.insert(modal.RepaintHooks, Library.RepaintHooks[index])
 	end
 
 	modal:SetOpen(true)
@@ -4373,6 +4444,9 @@ Track(UserInputService.InputBegan:Connect(function(input, gpe)
 end))
 
 function Library:Destroy()
+	for _, window in ipairs(self.Windows) do
+		for index = #(window.Modals or {}), 1, -1 do window.Modals[index]:Destroy() end
+	end
 	for _, conn in ipairs(self.Connections) do
 		pcall(function() conn:Disconnect() end)
 	end
