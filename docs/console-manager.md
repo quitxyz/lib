@@ -41,8 +41,10 @@ local console = ConsoleManager:Create(consoleTab)
 | `MountButton`, `Icon`, `ButtonOrder` | `true`, `square-terminal`, `2`; modal only |
 | `Spacing` | `9`; inline cards container only |
 | `Controls` | Set `UIOutput`, `RobloxOutput`, `Target`, `Filters`, `Copy`, `Save`, or `Clear` to `false` to omit those controls; `Output = false` hides both destination toggles |
-| `Labels` | Override `UIOutput`, `RobloxOutput`, `Target`, `Print`, `Warn`, `Error`, `Copy`, `Save`, `Clear`, `Empty`, `Saved`, `CopyFailed`, or `SaveFailed` text |
+| `Labels` | Override `UIOutput`, `RobloxOutput`, `UIOutputHint`, `RobloxOutputHint`, `Target`, `Print`, `Warn`, `Error`, `Copy`, `Save`, `Clear`, `Empty`, `Saved`, `CopyFailed`, or `SaveFailed` text |
 | `Colors` | Per-level Color3 values or theme tokens; defaults: Print=`Text`, Warn=`TextMarked`, Error=`Danger` |
+
+Both output toggles include a small help marker using the library’s existing toggle hints. Customize their explanations through `Labels.UIOutputHint` and `Labels.RobloxOutputHint`.
 
 The “ui console” and “roblox console” toggles independently route new script Print/Warn/Error calls. Both may be off. They do not change Roblox’s own logging, remove existing history, or stop capture of unrelated Roblox messages. Closing the panel only hides it.
 

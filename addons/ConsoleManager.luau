@@ -215,6 +215,8 @@ return function(Library)
                 table.insert(builders, function(column)
                     console.Controls.UIOutput = column:Toggle({
                         Text = labelText("UIOutput", "ui console"),
+                        Hint = labelText("UIOutputHint",
+                            "send script messages to this console. keeps collecting while the window is hidden."),
                         Flag = false,
                         Default = uiOutput,
                         Callback = function(value) console:SetUIOutput(value) end,
@@ -225,6 +227,8 @@ return function(Library)
                 table.insert(builders, function(column)
                     console.Controls.RobloxOutput = column:Toggle({
                         Text = labelText("RobloxOutput", "roblox console"),
+                        Hint = labelText("RobloxOutputHint",
+                            "send script messages to the native roblox console, even when ui console output is off."),
                         Flag = false,
                         Default = robloxOutput,
                         Callback = function(value) console:SetRobloxOutput(value) end,
