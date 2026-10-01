@@ -10,8 +10,8 @@ return function(Library)
         assert(type(opts.MaxVisibleRows or 100) == "number"
             and (opts.MaxVisibleRows or 100) >= 1 and (opts.MaxVisibleRows or 100) < math.huge,
             "MaxVisibleRows must be positive and finite")
-        assert(opts.Output == nil or opts.Output == "console" or opts.Output == "roblox" or opts.Output == "both",
-            "Output must be console, roblox, or both")
+        assert(opts.Output == nil or opts.Output == "console" or opts.Output == "roblox" or opts.Output == "both" or opts.Output == "none",
+            "Output must be console, roblox, both, or none")
         assert(opts.Target == nil or opts.Target == "Script" or opts.Target == "Roblox" or opts.Target == "Both",
             "Target must be Script, Roblox, or Both")
         assert(opts.Prefix == nil or type(opts.Prefix) == "string", "Prefix must be a string")
@@ -30,6 +30,10 @@ return function(Library)
         end
         local maxVisibleRows = opts.MaxVisibleRows or 100
         local output = opts.Output or "console"
+        local uiOutput = output == "console" or output == "both"
+        local robloxOutput = output == "roblox" or output == "both"
+        if opts.UIOutput ~= nil then uiOutput = opts.UIOutput ~= false end
+        if opts.RobloxOutput ~= nil then robloxOutput = opts.RobloxOutput ~= false end
         local consoleId = HttpService:GenerateGUID(false)
         local outputPrefix = "[" .. prefix .. ":" .. consoleId .. "] "
         local messageTypes = {
@@ -77,8 +81,8 @@ return function(Library)
         end
 
         console:SetMaxVisibleRows(maxVisibleRows)
-        assert(output == "console" or output == "roblox" or output == "both",
-            "Output must be console, roblox, or both")
+        assert(output == "console" or output == "roblox" or output == "both" or output == "none",
+            "Output must be console, roblox, both, or none")
 
         local function matches(entry)
             return (target == "Both" or entry.source == target)
@@ -108,18 +112,30 @@ return function(Library)
             end)
         end
 
-        function console:SetOutput(value)
-            assert(value == "console" or value == "roblox" or value == "both", "Invalid output destination")
+        function console:SetUIOutput(enabled)
             if not alive then return end
-            output = value
-            if self.Controls.Output then self.Controls.Output:Set(value, true) end
+            uiOutput = enabled ~= false
+            if self.Controls.UIOutput then self.Controls.UIOutput:Set(uiOutput, true) end
+        end
+
+        function console:SetRobloxOutput(enabled)
+            if not alive then return end
+            robloxOutput = enabled ~= false
+            if self.Controls.RobloxOutput then self.Controls.RobloxOutput:Set(robloxOutput, true) end
+        end
+
+        function console:SetOutput(value)
+            assert(value == "console" or value == "roblox" or value == "both" or value == "none",
+                "Invalid output destination")
+            self:SetUIOutput(value == "console" or value == "both")
+            self:SetRobloxOutput(value == "roblox" or value == "both")
         end
 
         function console:SetTarget(value)
             assert(value == "Script" or value == "Roblox" or value == "Both", "Invalid console target")
             if not alive then return end
             target = value
-            if self.Controls.Target then self.Controls.Target:Set(value, true) end
+            if self.Controls.Target then self.Controls.Target:Set(string.lower(value), true) end
             scheduleRender()
         end
 
@@ -153,11 +169,11 @@ return function(Library)
         local function write(level, ...)
             if not alive then return end
 
-            if output ~= "roblox" then
+            if uiOutput then
                 addEntry("Script", level, ...)
             end
 
-            if output ~= "console" then
+            if robloxOutput then
                 local values = table.pack(...)
                 for index = 1, values.n do
                     values[index] = tostring(values[index])
@@ -194,31 +210,41 @@ return function(Library)
         end
 
         if show.Output ~= false then
-            console.Controls.Output = content:Dropdown({
-                Text = labelText("Output", "script output"),
-                Flag = false,
-                Options = { "console", "roblox", "both" },
-                Default = output,
-                Multi = false,
-                Search = false,
-
-                Callback = function(value)
-                    console:SetOutput(value)
-                end,
-            })
+            local builders = {}
+            if show.UIOutput ~= false then
+                table.insert(builders, function(column)
+                    console.Controls.UIOutput = column:Toggle({
+                        Text = labelText("UIOutput", "ui console"),
+                        Flag = false,
+                        Default = uiOutput,
+                        Callback = function(value) console:SetUIOutput(value) end,
+                    })
+                end)
+            end
+            if show.RobloxOutput ~= false then
+                table.insert(builders, function(column)
+                    console.Controls.RobloxOutput = column:Toggle({
+                        Text = labelText("RobloxOutput", "roblox console"),
+                        Flag = false,
+                        Default = robloxOutput,
+                        Callback = function(value) console:SetRobloxOutput(value) end,
+                    })
+                end)
+            end
+            if #builders > 0 then content:Split(builders) end
         end
 
         if show.Target ~= false then
             console.Controls.Target = content:Dropdown({
-                Text = labelText("Target", "target"),
+                Text = labelText("Target", "source"),
                 Flag = false,
-                Options = { "Script", "Roblox", "Both" },
-                Default = target,
+                Options = { "script", "roblox", "both" },
+                Default = string.lower(target),
                 Multi = false,
                 Search = false,
 
                 Callback = function(value)
-                    console:SetTarget(value)
+                    console:SetTarget(({ script = "Script", roblox = "Roblox", both = "Both" })[value])
                 end,
             })
         end

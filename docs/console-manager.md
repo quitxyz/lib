@@ -6,7 +6,8 @@ ConsoleManager provides the template's console as an optional addon. It does not
 local ConsoleManager = assert(Library:LoadAddon("ConsoleManager"))
 local console = ConsoleManager:Create(Window, {
     MaxVisibleRows = 100,
-    Output = "console",
+    UIOutput = true,
+    RobloxOutput = false,
     Folder = "seized/logs",
     Prefix = "seized",
 })
@@ -28,8 +29,9 @@ local console = ConsoleManager:Create(consoleTab)
 | --- | --- |
 | `Title`, `Width`, `Height` | Modal title `console`, width `460`, height `0.85` |
 | `MaxVisibleRows` | `100` newest matching entries; positive finite number, rounded down |
-| `Output` | `console`; options: `console`, `roblox`, `both` |
-| `Target` | `Both`; display/export source filter: `Script`, `Roblox`, `Both` |
+| `UIOutput`, `RobloxOutput` | Independent script destinations; default `true`, `false` |
+| `Output` | Compatibility shorthand: `console`, `roblox`, `both`, or `none`; explicit destination booleans take precedence |
+| `Target` | `Both`; display/export source filter: `Script`, `Roblox`, `Both`; displayed as lowercase under “source” |
 | `Filters` | `{ Print = true, Warn = true, Error = true }`; visibility/export filters |
 | `CaptureRoblox` | `true`; listen for future `LogService.MessageOut` events |
 | `RichText` | `true` for script messages; Roblox messages are literal text |
@@ -38,9 +40,11 @@ local console = ConsoleManager:Create(consoleTab)
 | `Prefix` | `Facility`; native messages include this prefix and a unique instance ID |
 | `MountButton`, `Icon`, `ButtonOrder` | `true`, `square-terminal`, `2`; modal only |
 | `Spacing` | `9`; inline cards container only |
-| `Controls` | Set `Output`, `Target`, `Filters`, `Copy`, `Save`, or `Clear` to `false` to omit those controls |
-| `Labels` | Override `Output`, `Target`, `Print`, `Warn`, `Error`, `Copy`, `Save`, `Clear`, `Empty`, `Saved`, `CopyFailed`, or `SaveFailed` text |
+| `Controls` | Set `UIOutput`, `RobloxOutput`, `Target`, `Filters`, `Copy`, `Save`, or `Clear` to `false` to omit those controls; `Output = false` hides both destination toggles |
+| `Labels` | Override `UIOutput`, `RobloxOutput`, `Target`, `Print`, `Warn`, `Error`, `Copy`, `Save`, `Clear`, `Empty`, `Saved`, `CopyFailed`, or `SaveFailed` text |
 | `Colors` | Per-level Color3 values or theme tokens; defaults: Print=`Text`, Warn=`TextMarked`, Error=`Danger` |
+
+The “ui console” and “roblox console” toggles independently route new script Print/Warn/Error calls. Both may be off. They do not change Roblox’s own logging, remove existing history, or stop capture of unrelated Roblox messages. Closing the panel only hides it.
 
 Omitted controls do not disable the corresponding API methods. Controls use `Flag = false`; they do not enter saved game configs. Output routing and capture are distinct: choosing `roblox` forwards new script messages there, while unrelated Roblox messages can still be captured in the panel. Existing entries remain stored when routing changes.
 
@@ -58,7 +62,9 @@ Set the modal title through the top-level `Title` option, not `Labels`.
 
 ```lua
 console:SetMaxVisibleRows(50)
-console:SetOutput("both")
+console:SetUIOutput(true)
+console:SetRobloxOutput(true)
+console:SetOutput("both") -- shorthand for enabling both
 console:SetTarget("Script")
 console:SetFilter("Warn", false)
 console:SetCaptureRoblox(false)
@@ -68,7 +74,7 @@ console:Toggle()
 
 Setters keep the corresponding controls synchronized. Filters select the newest matching entries first, then display those entries chronologically. The row limit counts entries, not physical text lines; wrapped entries can occupy several lines.
 
-Returned handles are `Controls.Output`, `Controls.Target`, `Controls.Print`, `Controls.Warn`, `Controls.Error`, `Controls.Copy`, `Controls.Save`, and `Controls.Clear` when those controls were created. Other handles include `Content`, `LogArea`, `Root`/`Instance`, `Window`, and `ActionRow`. `Modal` and `Button` exist only for a modal and its optional footer button.
+Returned handles are `Controls.UIOutput`, `Controls.RobloxOutput`, `Controls.Target`, `Controls.Print`, `Controls.Warn`, `Controls.Error`, `Controls.Copy`, `Controls.Save`, and `Controls.Clear` when those controls were created. Other handles include `Content`, `LogArea`, `Root`/`Instance`, `Window`, and `ActionRow`. `Modal` and `Button` exist only for a modal and its optional footer button.
 
 ```lua
 console.Controls.Copy:SetText("copy visible history")
