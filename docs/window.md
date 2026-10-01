@@ -63,3 +63,7 @@ Library:SetMobileButtonVisible(false)
 | --- | --- | --- |
 | `Size` | `44` | square side in pixels |
 | `Position` | `UDim2.new(0, 18, 0.5, -22)` | starting position |
+
+### Initial visibility
+
+Pass `Visible = false` to `Library:Window({...})` to start hidden without animation. The separate mobile toggle remains available. Omit the option for the default visible window. InterfaceManager can subsequently apply its saved show-on-load preference.

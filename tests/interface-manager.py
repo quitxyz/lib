@@ -43,9 +43,17 @@ function Library:SafeCallback(_,f,...) return f(...) end
 function Library:SetToggleKey(v) self.key=v end
 function Library:RefreshCursor() end
 function Library:Destroy() self.destroyed=true end
-Window={Main=node(),Overlay=node()}
-function Window:SetUserScale(v) self.scale=v end
+Window={Main=node(),Overlay=node(),Scale={Scale=1},BaseScale=1}
+function Window:SetUserScale(v) self.scale=v; self.BaseScale=v * 0.8 end
 function Window:SetOpacity(v) self.opacity=v end
+function Window:Modal()
+ local m={Root=node(),Content={buttons={}}}
+ function m.Content:Label() end
+ function m.Content:Button(o) table.insert(self.buttons,o) end
+ function m:SetOpen(v) self.Open=v end
+ function m:Destroy() self.Root:Destroy() end
+ return m
+end
 function Window:Confirm(o) self.confirm=o end
 tab={Window=Window}
 function tab:Section()
@@ -82,6 +90,7 @@ Players.LocalPlayer.OnTeleport:Fire(1); assert(#queued==1)
 env.seizedExecutions=nil; assert(load(queued[1]))(); assert(env.seizedExecutions==3 and ran)
 a:Destroy()
 local b=manager:Create(tab,options)
+assert(Window.Scale.Scale == Window.BaseScale)
 assert(not Library.Open and not Window.Main.Visible and Window.scale==1.25 and b.Controls.AutoExecute.Value)
 b:Destroy()
 local count=#queued; Players.LocalPlayer.OnTeleport:Fire(1); assert(#queued==count)
@@ -93,7 +102,13 @@ failWrite=true; c.Controls.Opacity:Set(80); assert(#warnings==2 and Window.opaci
 failWrite=false
 Library.FileSystem.Memory['seized/configs/a']='config'
 local d=manager:Create(tab,options)
-d.Controls.HardReset.Options.Callback()
+d.Controls.Reset.Options.Callback()
+assert(d.ResetModal.Open)
+d.ResetModal.Content.buttons[1].Callback()
+assert(not d.ResetModal.Open and Window.scale==1 and Window.opacity==1)
+assert(not d.Settings.AutoExecute and d.Settings.ShowOnLoad)
+assert(Library.FileSystem.Memory['seized/configs/a']=='config')
+d.ResetModal.Content.buttons[2].Callback()
 assert(Window.confirm.ConfirmColor=='red' and not Library.destroyed)
 Window.confirm.OnConfirm()
 assert(Library.destroyed and Library.FileSystem.Memory['seized/configs/a']==nil)

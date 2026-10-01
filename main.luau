@@ -3483,6 +3483,7 @@ function Library:Window(opts)
 	ParentGui(gui)
 
 	local main = New("Frame", {
+		Visible = opts.Visible ~= false,
 		Size = UDim2.fromOffset(width, height),
 		Position = opts.Position or UDim2.fromScale(0.5, 0.5),
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -3687,7 +3688,7 @@ function Library:Window(opts)
 		MinWidth = opts.MinWidth or 460,
 		MinHeight = opts.MinHeight or 320,
 		Tabs = {},
-		Visible = true,
+		Visible = opts.Visible ~= false,
 	}, Window)
 
 	Track(blocker.Activated:Connect(function()
@@ -3807,6 +3808,10 @@ function Library:Window(opts)
 		Library:CreateMobileButton(opts.MobileButtonOptions)
 	end
 
+	if #Library.Windows == 0 then
+		Library.Open = opts.Visible ~= false
+		Library:RefreshCursor()
+	end
 	table.insert(Library.Windows, window)
 	return window
 end
