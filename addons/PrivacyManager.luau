@@ -885,8 +885,14 @@ return function(Library)
             Callback = function(value) draft.Appearance = value; updatePreview() end,
         })
         content:Label("badges · coming later")
-        fields.Badge = content:Dropdown({
-            Text = "badge", Flag = false, Options = { "default" }, Default = "default", Disabled = true,
+        fields.StatusIcon = content:Dropdown({
+            Text = "status icon · left", Flag = false,
+            Options = { "default", "none", "premium", "friend", "place owner", "star creator", "administrator", "intern" },
+            Default = "default", Disabled = true,
+        })
+        fields.Verification = content:Dropdown({
+            Text = "verification · right", Flag = false, Options = { "default", "none", "verified" },
+            Default = "default", Disabled = true,
         })
         content:Divider()
         content:Label("preview")

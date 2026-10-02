@@ -220,6 +220,6 @@ Matching R6/R15 body parts are required. Custom rigs, unusual accessory attachme
 
 ## Identity badges
 
-Badge controls are deferred. The custom editor shows a disabled badge selector with **default** as a placeholder. Applying an identity does not change native badge icons, add name suffixes or fetch account badge metadata. Existing left-side status icons and right-side verification remain untouched. There is no badge override API at this stage.
+Badge controls are deferred. The custom editor shows two disabled selectors: **status icon · left** and **verification · right**, both set to **default**. The choices are layout placeholders; native placement will be verified before implementation. Applying an identity does not change native badge icons, add name suffixes or fetch account badge metadata. Existing left-side status icons and right-side verification remain untouched. There is no badge override API at this stage.
 
 Avatar-only toggle changes refresh tracked images, live character visuals and recognised previews without reprocessing name text. Other identity or scope changes still refresh the relevant visual records.
