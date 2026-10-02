@@ -5,7 +5,7 @@ root=Path(__file__).resolve().parents[1]
 lua=LuaRuntime()
 lua.execute(r"""
 Vector2={zero="zero vector"}
-Enum={CreatorType={User="User"},MembershipType={Premium="Premium"},HumanoidRigType={R6="R6",R15="R15"},HumanoidDisplayDistanceType={None="None"},NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
+Enum={HumanoidRigType={R6="R6",R15="R15"},HumanoidDisplayDistanceType={None="None"},NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
 Vector3={new=function(x,y,z) return {X=x,Y=y,Z=z} end,zero={X=0,Y=0,Z=0}}
 local cfMeta={__mul=function(a,b) return b end}
 function cf(...) return setmetatable({position={...},ToObjectSpace=function(_,v) return v end},cfMeta) end
@@ -96,7 +96,6 @@ handle=node('Part',hat); handle.LocalTransparencyModifier=0
 sparkles=node('ParticleEmitter',handle); sparkles.Enabled=true
 tool=node('Tool',character); toolPart=node('Part',tool); toolPart.Color='tool color'
 Players={LocalPlayer=LocalPlayer}
-function Players:GetPlayerByUserId(id) return id==456 and onlineAccount or nil end
 function Players:GetUserIdFromNameAsync(name) assert(name=='AccountUser','not found'); return 456 end
 function Players:GetHumanoidDescriptionFromUserIdAsync(id) assert(id==456); return node('HumanoidDescription') end
 function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
@@ -108,9 +107,8 @@ function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
  return model
 end
 UserService={GetUserInfosByUserIdsAsync=function(_,ids)
- assert(ids[1]==456,'not found'); return {{Username='AccountUser',DisplayName='Account Display',HasVerifiedBadge=verifiedAccount==true}}
+ assert(ids[1]==456,'not found'); return {{Username='AccountUser',DisplayName='Account Display'}}
 end}
-function LocalPlayer:IsFriendsWithAsync(id) return friendAccount==true end
 RunService={RenderStepped=signal()}
 game={GetService=function(_,name)
  if name=='UserService' then return UserService elseif name=='RunService' then return RunService elseif name=='Players' then return Players elseif name=='CoreGui' then return coreGui elseif name=='Workspace' then return workspace end
@@ -173,13 +171,23 @@ panel.MethodControl:Set('custom'); assert(panel.EditCustom.Visible)
 panel.EditCustom.Options.Callback(); assert(panel.CustomEditor.Open)
 panel.EditorControls.DisplayName:Set('test name')
 assert(panel.EditorControls.Preview.Value:find('test name',1,true))
-panel.EditorControls.Badge:Set('custom'); assert(panel.EditorControls.BadgeText.Instance.Visible)
-panel.EditorControls.BadgeText:Set('tester')
-assert(panel.EditorControls.Preview.Value:find('test name tester',1,true))
+assert(panel.EditorControls.Badge.Options.Disabled == true)
+assert(not panel.EditorControls.BadgeText)
+assert(not panel.EditorControls.Preview.Value:find('[default]',1,true))
 assert(not panel.EditorControls.Load.Options.Disabled)
 assert(p:GetName()=='RealUser')
 panel.MethodControl:Set('anonymous'); assert(not panel.EditCustom.Visible)
+local premiumIcon=node('ImageLabel',facilityGui)
+premiumIcon.Image='rbxasset://textures/ui/PlayerList/PremiumIcon.png'
+local nativeBadge=label(facilityGui,utf8.char(0xE000))
 panel.Controls.Enabled:Set(true)
+assert(premiumIcon.Image=='rbxasset://textures/ui/PlayerList/PremiumIcon.png')
+assert(nativeBadge.Text==utf8.char(0xE000))
+local originalResolve, textResolutions=p.ResolveText,0
+p.ResolveText=function(self,...) textResolutions=textResolutions+1; return originalResolve(self,...) end
+p:SetOptions({HideAvatar=false}); p:SetOptions({HideAvatar=true})
+assert(textResolutions==0,'avatar toggles must not refresh name text')
+p.ResolveText=originalResolve
 assert(facilityLabel.Text=='teleport to seized.cc/1')
 assert(gameLabel.Text=='Real Display has joined')
 assert(LocalPlayer.Name=='RealUser' and LocalPlayer.DisplayName=='Real Display' and LocalPlayer.UserId==123)
@@ -340,7 +348,6 @@ p:SetAnonymous({Prefix='seized.cc/'})
 -- Custom identity: apply live fields, preserve independent scopes and appearance.
 panel.EditorControls.Username:Set('Alias')
 panel.EditorControls.DisplayName:Set('Custom Display')
-panel.EditorControls.Badge:Set('default')
 panel.EditorControls.UserId:Set('987')
 panel.EditorControls.Appearance:Set('keep mine')
 panel.EditorControls.Actions[2].Callback()
@@ -411,73 +418,6 @@ p:Restore(); assert(loadedVisual.Parent==nil and avatar.Image==bust)
 p:SetOptions({Enabled=true}); assert(LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance'))
 p:SetCustom({Appearance='keep mine'}); assert(not LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance'))
 p:SetMethod('anonymous'); assert(ownFace(newBody))
--- Applied badges follow scopes, preserve raw identity fields, and restore source text/icons.
-local verified=utf8.char(0xE000)
-local premium=utf8.char(0xE001)
-verifiedAccount=true
-local loaded=p:LoadAccount('456')
-p:SetCustom(loaded); p:SetMethod('custom')
-assert(p:GetBadge()==verified and p:GetIdentity().DisplayName=='Account Display')
-onlineAccount=node('Player'); onlineAccount.MembershipType=Enum.MembershipType.Premium
-friendAccount=true; game.CreatorType=Enum.CreatorType.User; game.CreatorId=456
-p:LoadAccount('456'); p:Refresh()
-assert(p:GetBadge()==verified..' '..premium..' [developer] [friend]')
-onlineAccount=nil; friendAccount=false; game.CreatorId=0
-p:LoadAccount('456'); p:Refresh()
-assert(p:GetBadge()==verified)
-assert(p:GetDisplayName()=='Account Display '..verified)
-local row=node('Frame',playerGui)
-local badgeLabel=label(row,'Real Display '..premium)
-local badgeImage=node('ImageLabel',row); badgeImage.Image='rbxasset://textures/ui/icon_admin-16.png'
-assert(badgeLabel.Text=='Account Display '..verified and badgeImage.Image=='')
-local unrelated=node('Frame',playerGui); unrelated:SetAttribute('UserId',999)
-local unrelatedIcon=node('ImageLabel',unrelated); unrelatedIcon.Image='rbxasset://textures/ui/icon_admin-16.png'
-assert(unrelatedIcon.Image~='')
-local otherText=label(unrelated,'someone else '..verified)
-assert(otherText.Text=='someone else '..verified)
-p:SetCustom({Badge='none'})
-assert(badgeLabel.Text=='Account Display' and p:GetBadge()=='')
-assert(p:ResolveText('Real Display'..verified,'game')=='Account Display')
-assert(p:ResolveText('Real Display '..verified..' '..premium..' has joined','game')=='Account Display has joined')
-for _,kind in ipairs({'verified','premium','developer','administrator','star creator','friend'}) do
- p:SetCustom({Badge=kind})
- assert(p:GetBadge() and p:GetBadge()~='' and badgeLabel.Text==p:GetDisplayName())
-end
-assert(p:GetBadge()=='[friend]')
-p:SetCustom({Badge='custom',BadgeText='A&B'})
-assert(p:ResolveText('<b>Real Display</b>','game',true)=='<b>Account Display A&amp;B</b>')
-assert(p:ResolveText('@RealUser','game')=='@AccountUser')
-assert(p:ResolveText('Real Display has joined','game')=='Account Display A&B has joined')
-assert(not pcall(function() p:SetCustom({Badge='unknown'}) end))
-assert(not pcall(function() p:SetCustom({BadgeText='<b>bad</b>'}) end))
-p:SetOptions({HideDisplayName=false})
-assert(badgeLabel.Text=='Real Display A&B')
-p:SetOptions({AffectGame=false})
-assert(badgeLabel.Text=='Real Display '..premium and badgeImage.Image~='')
-p:SetOptions({AffectGame=true,HideDisplayName=true})
-badgeLabel.Text='someone else'
-assert(badgeImage.Image~='') -- row now belongs to someone else
-badgeLabel.Text='Real Display '..premium
-assert(badgeImage.Image=='')
-p:Restore(); assert(badgeLabel.Text=='Real Display '..premium and badgeImage.Image~='')
-p:SetOptions({Enabled=true})
-p:SetCustom({Badge='default'})
-assert(p:GetBadge()==verified)
-p:SetCustom({UserId=111}); assert(p:GetBadge()==verified) -- linked account, not displayed ID
-p:SetMethod('anonymous'); assert(p:GetBadge()=='' and badgeLabel.Text=='seized.cc/1')
--- Applying a draft reads the latest text even if the input has not lost focus.
-panel.EditorControls.Badge:Set('custom')
-panel.EditorControls.BadgeText:Set('draft badge',true)
-panel.EditorControls.Actions[2].Callback()
-assert(p:GetBadge()=='draft badge')
-local oldDisplay=LocalPlayer.DisplayName
-LocalPlayer.DisplayName=LocalPlayer.Name
-p:SetOptions({HideUsername=false})
-assert(p:ResolveText('@RealUser','game')=='@RealUser')
-assert(p:ResolveText('RealUser','game')==p:GetDisplayName())
-LocalPlayer.DisplayName=oldDisplay
-p:SetOptions({HideUsername=true})
-p:SetCustom({Badge='default',BadgeText=''}); p:SetMethod('anonymous')
 -- Existing/open, newly created, late-owned and explicitly registered previews.
 local viewport=node('ViewportFrame',playerGui)
 local camera=node('Camera',viewport); viewport.CurrentCamera=camera
@@ -557,4 +497,4 @@ gameLabel.Text='RealUser again'; assert(gameLabel.Text=='RealUser again')
 assert(not pcall(function() factory(Library):SetOptions({NotAnOption=true}) end))
 Library.PrivacyManager:Destroy()
 """)
-print("PASS: identity/badge toggles, account metadata, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")
+print("PASS: identity toggles, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")

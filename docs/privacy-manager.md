@@ -192,7 +192,7 @@ local identity = PrivacyManager:GetCustom() -- defensive copy
 
 SetCustom validates all supplied fields before applying any changes. Names must be nonblank plain text up to 64 bytes; IDs must be non-negative integers within the safe numeric range. Setting custom values does not automatically enable privacy or switch the method.
 
-Generic text containing identical real username/display-name tokens uses the display-name replacement. Explicit @usernames stay undecorated and follow HideUsername. Typed identity getters preserve the distinction.
+Generic text containing identical real username/display-name tokens uses the username replacement. Typed identity getters preserve the distinction.
 
 BuildPrivacySection accepts EditorWidth (default 420) and EditorHeight (default 0.86). Its panel exposes CustomEditor, EditorControls and Draft. The editor itself is excluded from privacy replacement so its labels and draft preview remain readable. Destroying the panel destroys its editor.
 
@@ -220,32 +220,6 @@ Matching R6/R15 body parts are required. Custom rigs, unusual accessory attachme
 
 ## Identity badges
 
-The custom editor badge selector is functional. Choose a style and press **apply identity**; edits remain a draft until applied. All styles are presentation-only, with the existing master privacy and Facility/game scope switches.
+Badge controls are deferred. The custom editor shows a disabled badge selector with **default** as a placeholder. Applying an identity does not change native badge icons, add name suffixes or fetch account badge metadata. Existing left-side status icons and right-side verification remain untouched. There is no badge override API at this stage.
 
-| Style | Display |
-| --- | --- |
-| default | Available badge metadata from the loaded account; without a linked account, preserve existing source badges |
-| none | Remove recognised inline/local-row badges |
-| verified | Roblox verified text glyph |
-| premium | Roblox premium text glyph |
-| developer | [developer] |
-| administrator | [administrator] |
-| star creator | ★ |
-| friend | [friend] |
-| custom | Your plain text or symbol, up to 64 bytes |
-
-Developer, administrator and friend use readable text labels in generic name text; these are not reproductions of every native icon layout. Anonymous identities remove recognised badges by default. Badge overrides work independently of HideAvatar and HideDisplayName: you can retain a real name and still change its visual badge. @usernames remain plain.
-
-**Default account metadata:** verification comes from UserService account info. Experience creator is detected for a user-owned experience. Friendship is checked relative to the local player if available. Premium is read only when the loaded account has a Player in this server. Offline Premium, administrator and star creator status are not inferred. Those styles remain selectable manually. Changing the displayed UserId does not change the linked account's badge metadata.
-
-GetIdentity().DisplayName remains undecorated and GetIdentity().Badge contains the chosen badge text. GetDisplayName() includes the badge suffix. GetBadge() returns nil when preserving original badges, an empty string for none, or the selected badge text. Identity getters ignore visual scope; ResolveText and automatic watchers apply scope switches.
-
-```lua
-PrivacyManager:SetCustom({ Badge = "verified" })
-PrivacyManager:SetCustom({ Badge = "custom", BadgeText = "★ seized" })
-PrivacyManager:SetCustom({ Badge = "default" })
-```
-
-Text resolution replaces recognised adjacent inline badges instead of appending duplicates, preserves RichText markup, and escapes custom text. The watcher hides recognised Roblox admin/intern/star/creator/friend image assets only in identifiable local-player rows, showing the selected style in the name instead. It restores source text/images when privacy or that scope is disabled. Unrelated player rows and arbitrary art are untouched.
-
-Custom icon assets, sprite sheets and game-specific badge containers are not guessed. Such layouts can need a game adapter. Badge glyph rendering depends on the UI font. This manager does not change Player.HasVerifiedBadge, memberships or other actual account properties.
+Avatar-only toggle changes refresh tracked images, live character visuals and recognised previews without reprocessing name text. Other identity or scope changes still refresh the relevant visual records.
