@@ -166,6 +166,7 @@ return function(Library)
         local head = classicPart(parent, "FacilityAnonymousHead", Vector3.new(2, 1, 1), Vector3.zero)
         local mesh = Instance.new("SpecialMesh")
         mesh.MeshType = Enum.MeshType.Head
+        mesh.Scale = Vector3.new(1.25, 1.25, 1.25)
         mesh.Parent = head
         local face = Instance.new("Decal")
         face.Name = "FacilityAnonymousFace"
@@ -224,7 +225,7 @@ return function(Library)
         elseif kind == "avatarbust" then
             camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -7), Vector3.new(0, 1.6, 0))
         else
-            camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.6, -4.5), Vector3.new(0, 2.3, 0))
+            camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.6, -3.1), Vector3.new(0, 2.5, 0))
         end
         camera.Parent = viewport
         viewport.CurrentCamera = camera

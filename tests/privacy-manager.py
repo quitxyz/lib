@@ -188,6 +188,13 @@ local function preview(image)
 end
 assert(preview(avatar) and preview(avatar):IsA('ViewportFrame'))
 assert(preview(avatar).CurrentCamera)
+local portrait=preview(avatar)
+assert(portrait.CurrentCamera.CFrame.eye.Z == -3.1)
+assert(portrait.CurrentCamera.CFrame.target.Y == 2.5)
+local portraitWorld=portrait:FindFirstChildOfClass('WorldModel')
+local portraitHead=portraitWorld:FindFirstChildOfClass('Part')
+local headMesh=portraitHead:FindFirstChildOfClass('SpecialMesh')
+assert(headMesh.Scale.X==1.25 and headMesh.Scale.Y==1.25 and headMesh.Scale.Z==1.25)
 local firstPreview=preview(avatar)
 avatar.Image=bust; assert(preview(avatar)~=firstPreview and firstPreview.Parent==nil)
 avatar.Image=head
@@ -225,6 +232,8 @@ end
 assert(ownFace(body) and ownFace(body).Texture=='rbxassetid://144080495')
 assert(ownFace(body).Transparency==0 and body.Transparency==1)
 local proxy=ownFace(body).Parent
+local proxyMesh=proxy:FindFirstChildOfClass("SpecialMesh")
+assert(proxyMesh.Scale.X==1.25 and proxyMesh.Scale.Y==1.25 and proxyMesh.Scale.Z==1.25)
 assert(proxy.Anchored and not proxy.CanCollide and not proxy.CanQuery and not proxy.CanTouch)
 body.CFrame=CFrame.new(4,5,6); body.LocalTransparencyModifier=0.8
 RunService.RenderStepped:Fire()
