@@ -176,10 +176,118 @@ return function(Library)
         for _, node in ipairs(root:GetDescendants()) do watch(node) end
     end
 
+    -- Change only visual properties on the existing character; never replace the rig.
+    local character, characterConnections = nil, {}
+    local characterVisuals = {}
+    local neutralColor = Color3.fromRGB(160, 160, 160)
+
+    local function characterEnabled()
+        return manager.Alive and manager.Options.Enabled
+            and manager.Options.AffectGame and manager.Options.HideAvatar
+    end
+
+    local function applyVisual(node, property, record)
+        if record.writing then return end
+        local value = record.original
+        if characterEnabled() then value = record.masked end
+        record.rendered = value
+        if node[property] ~= value then
+            record.writing = true
+            local success = pcall(function() node[property] = value end)
+            record.writing = false
+            if not success then record.rendered = node[property] end
+        end
+    end
+
+    local function forgetVisual(node)
+        local records = characterVisuals[node]
+        if not records then return end
+        characterVisuals[node] = nil
+        for property, record in pairs(records.properties) do
+            record.connection:Disconnect()
+            pcall(function() node[property] = record.original end)
+        end
+        for _, connection in ipairs(records.connections) do connection:Disconnect() end
+    end
+
+    local function maskProperty(node, property, masked)
+        local success, original = pcall(function() return node[property] end)
+        if not success then return end
+        local records = characterVisuals[node]
+        if not records then
+            records = { properties = {}, connections = {} }
+            characterVisuals[node] = records
+            table.insert(records.connections, node.Destroying:Connect(function() forgetVisual(node) end))
+            table.insert(records.connections, node.AncestryChanged:Connect(function()
+                if not character or not node:IsDescendantOf(character) then forgetVisual(node) end
+            end))
+        end
+        if records.properties[property] then return end
+        local record = { original = original, rendered = original, masked = masked }
+        records.properties[property] = record
+        record.connection = node:GetPropertyChangedSignal(property):Connect(function()
+            if record.writing or node[property] == record.rendered then return end
+            record.original = node[property]
+            applyVisual(node, property, record)
+        end)
+        applyVisual(node, property, record)
+    end
+
+    local function watchCharacterVisual(node)
+        if not character or not node:IsDescendantOf(character) then return end
+        local ancestor, accessory, body = node, false, nil
+        while ancestor and ancestor ~= character do
+            if ancestor:IsA("Tool") then return end
+            if ancestor:IsA("Accessory") then accessory = true end
+            if ancestor:IsA("BasePart") and ancestor.Parent == character
+                and ancestor.Name ~= "HumanoidRootPart" then body = ancestor end
+            ancestor = ancestor.Parent
+        end
+        if accessory then
+            if node:IsA("BasePart") then maskProperty(node, "LocalTransparencyModifier", 1)
+            elseif node:IsA("ParticleEmitter") or node:IsA("Trail") or node:IsA("Beam") then
+                maskProperty(node, "Enabled", false)
+            end
+        elseif body then
+            if node == body then
+                maskProperty(node, "Color", neutralColor)
+                if node:IsA("MeshPart") then maskProperty(node, "TextureID", "") end
+            elseif node:IsA("Decal") or node:IsA("Texture") then
+                maskProperty(node, "Transparency", 1)
+            elseif node:IsA("SpecialMesh") then maskProperty(node, "TextureId", "") end
+        elseif node.Parent == character then
+            if node:IsA("Shirt") then maskProperty(node, "ShirtTemplate", "")
+            elseif node:IsA("Pants") then maskProperty(node, "PantsTemplate", "")
+            elseif node:IsA("ShirtGraphic") then maskProperty(node, "Graphic", "") end
+        end
+    end
+
+    local function detachCharacter()
+        for _, connection in ipairs(characterConnections) do connection:Disconnect() end
+        table.clear(characterConnections)
+        for node in pairs(characterVisuals) do forgetVisual(node) end
+        character = nil
+    end
+
+    local function attachCharacter(nextCharacter)
+        if character == nextCharacter then return end
+        detachCharacter()
+        character = nextCharacter
+        if not character then return end
+        table.insert(characterConnections, character.DescendantAdded:Connect(watchCharacterVisual))
+        table.insert(characterConnections, character.Destroying:Connect(detachCharacter))
+        for _, node in ipairs(character:GetDescendants()) do watchCharacterVisual(node) end
+    end
+
     local gameStarted = false
     local function startGame()
         if gameStarted then return end
         gameStarted = true
+        table.insert(connections, LocalPlayer.CharacterAdded:Connect(attachCharacter))
+        table.insert(connections, LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
+            if character == oldCharacter then detachCharacter() end
+        end))
+        attachCharacter(LocalPlayer.Character)
         local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
         if playerGui then manager:WatchRoot(playerGui, "game") end
         table.insert(connections, LocalPlayer.ChildAdded:Connect(function(child)
@@ -194,6 +302,9 @@ return function(Library)
         if not self.Alive then return end
         if self.Options.Enabled and self.Options.AffectGame then startGame() end
         for node, record in pairs(watched) do apply(node, record) end
+        for node, records in pairs(characterVisuals) do
+            for property, record in pairs(records.properties) do applyVisual(node, property, record) end
+        end
         for panel in pairs(panels) do
             for key, control in pairs(panel.Controls) do control:Set(self.Options[key], true) end
         end
@@ -236,7 +347,7 @@ return function(Library)
             toggle(content, "HideAvatar", "hide avatar")
             content:Divider()
             toggle(content, "AffectFacility", "affect facility")
-            toggle(content, "AffectGame", "affect game ui")
+            toggle(content, "AffectGame", "affect game")
         end)
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
@@ -288,6 +399,7 @@ return function(Library)
     function manager:Destroy()
         if not self.Alive then return end
         self.Alive = false
+        detachCharacter()
         for node in pairs(watched) do forget(node, true) end
         for root, record in pairs(roots) do
             for _, connection in ipairs(record.connections) do connection:Disconnect() end

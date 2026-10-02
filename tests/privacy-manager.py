@@ -4,6 +4,8 @@ from lupa.lua54 import LuaRuntime
 root=Path(__file__).resolve().parents[1]
 lua=LuaRuntime()
 lua.execute(r"""
+Color3={fromRGB=function(r,g,b) return r .. "," .. g .. "," .. b end}
+table.clear=function(t) for k in pairs(t) do t[k]=nil end end
 table.find=function(t,v) for i,x in ipairs(t) do if x==v then return i end end end
 function signal()
  local s={listeners={}}
@@ -18,10 +20,10 @@ end
 nodes={}
 function node(class,parent,text)
  local props={ClassName=class,Text=text or '',Image='',RichText=false}
- local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal()}
+ local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal(),CharacterAdded=signal(),CharacterRemoving=signal()}
  local changed={}
  local methods={}
- function methods:IsA(c) return props.ClassName==c end
+ function methods:IsA(c) return props.ClassName==c or (c=="BasePart" and (props.ClassName=="Part" or props.ClassName=="MeshPart")) end
  function methods:GetPropertyChangedSignal(k) changed[k]=changed[k] or signal(); return changed[k] end
  function methods:IsDescendantOf(root)
   local p=props.Parent; while p do if p==root then return true end; p=p.Parent end; return false
@@ -62,6 +64,15 @@ end
 LocalPlayer=node('Player'); LocalPlayer.Name='RealUser'; LocalPlayer.DisplayName='Real Display'; LocalPlayer.UserId=123
 playerGui=node('PlayerGui',LocalPlayer)
 coreGui=node('CoreGui'); workspace=node('Workspace')
+character=node('Model',workspace); LocalPlayer.Character=character
+body=node('MeshPart',character); body.Name='Head'; body.Color='original color'; body.TextureID='body texture'
+face=node('Decal',body); face.Transparency=0
+rootPart=node('Part',character); rootPart.Name='HumanoidRootPart'; rootPart.Color='root color'
+shirt=node('Shirt',character); shirt.ShirtTemplate='shirt texture'
+hat=node('Accessory',character)
+handle=node('Part',hat); handle.LocalTransparencyModifier=0
+sparkles=node('ParticleEmitter',handle); sparkles.Enabled=true
+tool=node('Tool',character); toolPart=node('Part',tool); toolPart.Color='tool color'
 Players={LocalPlayer=LocalPlayer}
 game={GetService=function(_,name)
  if name=='Players' then return Players elseif name=='CoreGui' then return coreGui elseif name=='Workspace' then return workspace end
@@ -165,14 +176,38 @@ avatar.Parent=nil; assert(avatar.Image==bust)
 avatar.Parent=facilityGui; assert(avatar.Image==placeholder)
 p:Restore(); assert(avatar.Image==bust)
 p:SetOptions({Enabled=true})
+assert(body.Color=='160,160,160' and body.TextureID=='')
+assert(face.Transparency==1 and shirt.ShirtTemplate=='')
+assert(handle.LocalTransparencyModifier==1 and sparkles.Enabled==false)
+assert(rootPart.Color=='root color' and toolPart.Color=='tool color')
+body.Color='updated color'; assert(body.Color=='160,160,160')
+p:SetOptions({HideAvatar=false})
+assert(body.Color=='updated color' and body.TextureID=='body texture')
+assert(face.Transparency==0 and shirt.ShirtTemplate=='shirt texture')
+assert(handle.LocalTransparencyModifier==0 and sparkles.Enabled==true)
+p:SetOptions({HideAvatar=true,AffectGame=false}); assert(body.Color=='updated color')
+p:SetOptions({AffectGame=true})
+local pants=node('Pants',character); pants.PantsTemplate='late clothing'
+assert(pants.PantsTemplate=='')
+local detached=node('Decal',body); detached.Transparency=0
+assert(detached.Transparency==1)
+detached.Parent=workspace; assert(detached.Transparency==0)
+local newCharacter=node('Model',workspace)
+local newBody=node('Part',newCharacter); newBody.Name='Torso'; newBody.Color='new body color'
+LocalPlayer.CharacterRemoving:Fire(character)
+assert(body.Color=='updated color' and pants.PantsTemplate=='late clothing')
+LocalPlayer.Character=newCharacter; LocalPlayer.CharacterAdded:Fire(newCharacter)
+assert(newBody.Color=='160,160,160')
 local doomed=label(playerGui,'RealUser'); doomed:Destroy()
 p:Destroy()
 assert(gameLabel.Text=='Real Display has joined' and newLabel.Text=='Real Display is ready')
 assert(facilityLabel.Text=='teleport to RealUser')
 assert(not p.Alive and Library.PrivacyManager==nil)
 assert(avatar.Image==bust and gameAvatar.Image==bust)
+assert(newBody.Color=='new body color')
+newBody.Color='after unload'; assert(newBody.Color=='after unload')
 gameLabel.Text='RealUser again'; assert(gameLabel.Text=='RealUser again')
 assert(not pcall(function() factory(Library):SetOptions({NotAnOption=true}) end))
 Library.PrivacyManager:Destroy()
 """)
-print("PASS: identity toggles, scope separation, new/live UI, literal boundaries, RichText, restoration and cleanup")
+print("PASS: identity toggles, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")
