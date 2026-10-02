@@ -270,7 +270,9 @@ return function(Library)
         end
     end
 
+    local watchPreview
     local function watch(node)
+        if watchPreview then watchPreview(node) end
         if not manager.Alive or watched[node] then return end
         local property
         if node:IsA("TextLabel") or node:IsA("TextButton") then property = "Text"
@@ -309,166 +311,286 @@ return function(Library)
         for _, node in ipairs(root:GetDescendants()) do watch(node) end
     end
 
-    -- Change only visual properties on the existing character; never replace the rig.
-    local character, characterConnections = nil, {}
-    local characterVisuals = {}
-    local neutralColor = anonymousColor
-    local ownedHeads = {}
-
-    local function clearFaces()
-        for head, visual in pairs(ownedHeads) do
-            ownedHeads[head] = nil
-            visual:Destroy()
-            ownedVisuals[visual] = nil
-        end
-    end
-
-    local function characterEnabled()
-        return manager.Alive and manager.Options.Enabled
-            and manager.Options.AffectGame and manager.Options.HideAvatar
-    end
-
-    local function syncHeads()
-        for head, visual in pairs(ownedHeads) do
-            if head.Parent == character then
-                visual.CFrame = head.CFrame
-                visual.LocalTransparencyModifier = head.LocalTransparencyModifier
-                local records = characterVisuals[head]
-                local transparency = records and records.properties.Transparency
-                visual.Transparency = transparency and transparency.original or 0
+    -- One reversible appearance controller for live characters and UI copies.
+    local function createAppearance(model, isPreview, enabled)
+        local inheritedHead = false
+        if isPreview then
+            for _, child in ipairs(model:GetChildren()) do
+                if child:IsA("BasePart") and child.Name == "FacilityAnonymousHead" then inheritedHead = true end
             end
         end
-    end
+        local character, characterConnections = nil, {}
+        local characterVisuals = {}
+        local neutralColor = anonymousColor
+        local ownedHeads = {}
 
-    local function refreshFaces()
-        if not characterEnabled() or not character then clearFaces(); return end
-        for head, visual in pairs(ownedHeads) do
-            if head.Parent ~= character or visual.Parent ~= character then
+        local function clearFaces()
+            for head, visual in pairs(ownedHeads) do
                 ownedHeads[head] = nil
                 visual:Destroy()
                 ownedVisuals[visual] = nil
             end
         end
-        for _, head in ipairs(character:GetChildren()) do
-            if head:IsA("BasePart") and head.Name == "Head" and not ownedHeads[head] then
-                local visual = classicHead(nil)
-                ownedHeads[head], ownedVisuals[visual] = visual, true
-                visual.CFrame = head.CFrame
-                visual.Parent = character
-            end
-        end
-        syncHeads()
-    end
 
-    local function applyVisual(node, property, record)
-        if record.writing then return end
-        local value = record.original
-        if characterEnabled() then value = record.masked end
-        record.rendered = value
-        if node[property] ~= value then
-            record.writing = true
-            local success = pcall(function() node[property] = value end)
-            record.writing = false
-            if not success then record.rendered = node[property] end
+        local function characterEnabled()
+            return manager.Alive and manager.Options.Enabled and manager.Options.HideAvatar and enabled()
         end
-    end
 
-    local function forgetVisual(node)
-        local records = characterVisuals[node]
-        if not records then return end
-        characterVisuals[node] = nil
-        local visual = ownedHeads[node]
-        if visual then
-            ownedHeads[node] = nil
-            visual:Destroy()
-            ownedVisuals[visual] = nil
-        end
-        for property, record in pairs(records.properties) do
-            record.connection:Disconnect()
-            pcall(function() node[property] = record.original end)
-        end
-        for _, connection in ipairs(records.connections) do connection:Disconnect() end
-    end
-
-    local function maskProperty(node, property, masked)
-        local success, original = pcall(function() return node[property] end)
-        if not success then return end
-        local records = characterVisuals[node]
-        if not records then
-            records = { properties = {}, connections = {} }
-            characterVisuals[node] = records
-            table.insert(records.connections, node.Destroying:Connect(function() forgetVisual(node) end))
-            table.insert(records.connections, node.AncestryChanged:Connect(function()
-                if not character or not node:IsDescendantOf(character) then forgetVisual(node) end
-            end))
-        end
-        if records.properties[property] then return end
-        local record = { original = original, rendered = original, masked = masked }
-        records.properties[property] = record
-        record.connection = node:GetPropertyChangedSignal(property):Connect(function()
-            if record.writing or node[property] == record.rendered then return end
-            record.original = node[property]
-            applyVisual(node, property, record)
-        end)
-        applyVisual(node, property, record)
-    end
-
-    local function watchCharacterVisual(node)
-        if ownedVisuals[node] or not character or not node:IsDescendantOf(character) then return end
-        local ancestor, accessory, body = node, false, nil
-        while ancestor and ancestor ~= character do
-            if ownedVisuals[ancestor] or ancestor:IsA("Tool") then return end
-            if ancestor:IsA("Accessory") then accessory = true end
-            if ancestor:IsA("BasePart") and ancestor.Parent == character
-                and ancestor.Name ~= "HumanoidRootPart" then body = ancestor end
-            ancestor = ancestor.Parent
-        end
-        if accessory then
-            if node:IsA("BasePart") then maskProperty(node, "LocalTransparencyModifier", 1)
-            elseif node:IsA("ParticleEmitter") or node:IsA("Trail") or node:IsA("Beam") then
-                maskProperty(node, "Enabled", false)
-            end
-        elseif body then
-            if node == body then
-                maskProperty(node, "Color", neutralColor)
-                if node:IsA("MeshPart") then maskProperty(node, "TextureID", "") end
-                if node.Name == "Head" then
-                    maskProperty(node, "Transparency", 1)
-                    refreshFaces()
+        local function syncHeads()
+            for head, visual in pairs(ownedHeads) do
+                if head.Parent == character then
+                    visual.CFrame = head.CFrame
+                    visual.LocalTransparencyModifier = isPreview and 0 or head.LocalTransparencyModifier
+                    local records = characterVisuals[head]
+                    local transparency = records and records.properties.Transparency
+                    local original = transparency and transparency.original or 0
+                    -- Copies made during masking inherit an invisible original Head.
+                    visual.Transparency = inheritedHead and original == 1 and 0 or original
                 end
-            elseif node:IsA("Decal") or node:IsA("Texture") then
+            end
+        end
+
+        local function refreshFaces()
+            if not characterEnabled() or not character then clearFaces(); return end
+            for head, visual in pairs(ownedHeads) do
+                if head.Parent ~= character or visual.Parent ~= character then
+                    ownedHeads[head] = nil
+                    visual:Destroy()
+                    ownedVisuals[visual] = nil
+                end
+            end
+            for _, head in ipairs(character:GetChildren()) do
+                if head:IsA("BasePart") and head.Name == "Head" and not ownedHeads[head] then
+                    local visual = classicHead(nil)
+                    ownedHeads[head], ownedVisuals[visual] = visual, true
+                    visual.CFrame = head.CFrame
+                    visual.Parent = character
+                end
+            end
+            syncHeads()
+        end
+
+        local function applyVisual(node, property, record)
+            if record.writing then return end
+            local value = record.original
+            if characterEnabled() then value = record.masked end
+            record.rendered = value
+            if node[property] ~= value then
+                record.writing = true
+                local success = pcall(function() node[property] = value end)
+                record.writing = false
+                if not success then record.rendered = node[property] end
+            end
+        end
+
+        local function forgetVisual(node)
+            local records = characterVisuals[node]
+            if not records then return end
+            characterVisuals[node] = nil
+            local visual = ownedHeads[node]
+            if visual then
+                ownedHeads[node] = nil
+                visual:Destroy()
+                ownedVisuals[visual] = nil
+            end
+            for property, record in pairs(records.properties) do
+                record.connection:Disconnect()
+                pcall(function() node[property] = record.original end)
+            end
+            for _, connection in ipairs(records.connections) do connection:Disconnect() end
+        end
+
+        local function maskProperty(node, property, masked)
+            local success, original = pcall(function() return node[property] end)
+            if not success then return end
+            local records = characterVisuals[node]
+            if not records then
+                records = { properties = {}, connections = {} }
+                characterVisuals[node] = records
+                table.insert(records.connections, node.Destroying:Connect(function() forgetVisual(node) end))
+                table.insert(records.connections, node.AncestryChanged:Connect(function()
+                    if not character or not node:IsDescendantOf(character) then forgetVisual(node) end
+                end))
+            end
+            if records.properties[property] then return end
+            local record = { original = original, rendered = original, masked = masked }
+            records.properties[property] = record
+            record.connection = node:GetPropertyChangedSignal(property):Connect(function()
+                if record.writing or node[property] == record.rendered then return end
+                record.original = node[property]
+                applyVisual(node, property, record)
+            end)
+            applyVisual(node, property, record)
+        end
+
+        local function watchCharacterVisual(node)
+            if ownedVisuals[node] or not character or not node:IsDescendantOf(character) then return end
+            -- A menu may clone the world character while its owned head is present.
+            if node.Parent == character and node:IsA("BasePart") and node.Name == "FacilityAnonymousHead" then
                 maskProperty(node, "Transparency", 1)
-            elseif node:IsA("SpecialMesh") then maskProperty(node, "TextureId", "") end
-        elseif node.Parent == character then
-            if node:IsA("Shirt") then maskProperty(node, "ShirtTemplate", "")
-            elseif node:IsA("Pants") then maskProperty(node, "PantsTemplate", "")
-            elseif node:IsA("ShirtGraphic") then maskProperty(node, "Graphic", "") end
+                return
+            end
+            local ancestor, accessory, body = node, false, nil
+            while ancestor and ancestor ~= character do
+                if ownedVisuals[ancestor] or ancestor:IsA("Tool") then return end
+                if ancestor:IsA("Accessory") then accessory = true end
+                if ancestor:IsA("BasePart") and ancestor.Parent == character
+                    and ancestor.Name ~= "HumanoidRootPart" then body = ancestor end
+                ancestor = ancestor.Parent
+            end
+            if accessory then
+                if node:IsA("BasePart") then maskProperty(node, isPreview and "Transparency" or "LocalTransparencyModifier", 1)
+                elseif node:IsA("ParticleEmitter") or node:IsA("Trail") or node:IsA("Beam") then
+                    maskProperty(node, "Enabled", false)
+                end
+            elseif body then
+                if node == body then
+                    maskProperty(node, "Color", neutralColor)
+                    if node:IsA("MeshPart") then maskProperty(node, "TextureID", "") end
+                    if node.Name == "Head" then
+                        maskProperty(node, "Transparency", 1)
+                        refreshFaces()
+                    end
+                elseif node:IsA("Decal") or node:IsA("Texture") then
+                    maskProperty(node, "Transparency", 1)
+                elseif node:IsA("SpecialMesh") then maskProperty(node, "TextureId", "") end
+            elseif node.Parent == character then
+                if node:IsA("Shirt") then maskProperty(node, "ShirtTemplate", "")
+                elseif node:IsA("Pants") then maskProperty(node, "PantsTemplate", "")
+                elseif node:IsA("ShirtGraphic") then maskProperty(node, "Graphic", "") end
+            end
+        end
+
+        local function detachCharacter()
+            clearFaces()
+            for _, connection in ipairs(characterConnections) do connection:Disconnect() end
+            table.clear(characterConnections)
+            for node in pairs(characterVisuals) do forgetVisual(node) end
+            character = nil
+        end
+
+        local function attachCharacter(nextCharacter)
+            if character == nextCharacter then return end
+            detachCharacter()
+            character = nextCharacter
+            if not character then return end
+            table.insert(characterConnections, character.DescendantAdded:Connect(watchCharacterVisual))
+            table.insert(characterConnections, character.Destroying:Connect(detachCharacter))
+            for _, node in ipairs(character:GetDescendants()) do watchCharacterVisual(node) end
+        end
+
+        attachCharacter(model)
+        return {
+            Refresh = function()
+                for node, records in pairs(characterVisuals) do
+                    for property, record in pairs(records.properties) do applyVisual(node, property, record) end
+                end
+                refreshFaces()
+            end,
+            Sync = syncHeads,
+            Destroy = detachCharacter,
+        }
+    end
+
+    local character, characterMask
+    local function detachCharacter()
+        if characterMask then characterMask.Destroy() end
+        character, characterMask = nil, nil
+    end
+    local function attachCharacter(model)
+        if character == model then return end
+        detachCharacter()
+        character = model
+        if model then
+            characterMask = createAppearance(model, false, function() return manager.Options.AffectGame end)
         end
     end
 
-    local function detachCharacter()
-        clearFaces()
-        for _, connection in ipairs(characterConnections) do connection:Disconnect() end
-        table.clear(characterConnections)
-        for node in pairs(characterVisuals) do forgetVisual(node) end
-        character = nil
+    local previewModels = {}
+    local function previewScope(model)
+        local node, viewport = model, false
+        while node do
+            if ownedVisuals[node] then return nil end
+            if node:IsA("ViewportFrame") then viewport = true end
+            node = node.Parent
+        end
+        return viewport and scopeOf(model) or nil
+    end
+    local function previewIsLocal(model, record)
+        if record.player then return record.player == LocalPlayer end
+        -- Explicit ownership wins over names. Never infer from a display name alone.
+        for _, key in ipairs({ "UserId", "PlayerUserId", "OwnerUserId" }) do
+            local value = model:GetAttribute(key)
+            if value ~= nil then return tonumber(value) == LocalPlayer.UserId end
+        end
+        return model.Name == LocalPlayer.Name or model.Name == tostring(LocalPlayer.UserId)
+    end
+    local function refreshPreview(model, record)
+        if record.refreshing then return end
+        record.refreshing = true
+        local scope = previewScope(model)
+        local eligible = scope and previewIsLocal(model, record) and model:FindFirstChildOfClass("Humanoid")
+        if eligible and not record.mask then
+            record.mask = createAppearance(model, true, function()
+                local currentScope = previewScope(model)
+                return previewIsLocal(model, record) and (currentScope == "facility" and manager.Options.AffectFacility
+                    or currentScope == "game" and manager.Options.AffectGame)
+            end)
+        elseif not eligible and record.mask then
+            record.mask.Destroy()
+            record.mask = nil
+        end
+        if record.mask then record.mask.Refresh() end
+        record.refreshing = false
+    end
+    local function forgetPreview(model)
+        local record = previewModels[model]
+        if not record then return end
+        previewModels[model] = nil
+        for _, connection in ipairs(record.connections) do connection:Disconnect() end
+        if record.mask then record.mask.Destroy() end
+    end
+    watchPreview = function(model)
+        if not manager.Alive or not model:IsA("Model") or previewModels[model] or not previewScope(model) then return end
+        local record = { connections = {} }
+        previewModels[model] = record
+        local function refresh() refreshPreview(model, record) end
+        table.insert(record.connections, model:GetPropertyChangedSignal("Name"):Connect(refresh))
+        for _, key in ipairs({ "UserId", "PlayerUserId", "OwnerUserId" }) do
+            table.insert(record.connections, model:GetAttributeChangedSignal(key):Connect(refresh))
+        end
+        table.insert(record.connections, model.ChildAdded:Connect(refresh))
+        table.insert(record.connections, model.AncestryChanged:Connect(refresh))
+        table.insert(record.connections, model.Destroying:Connect(function() forgetPreview(model) end))
+        refresh()
     end
 
-    local function attachCharacter(nextCharacter)
-        if character == nextCharacter then return end
-        detachCharacter()
-        character = nextCharacter
-        if not character then return end
-        table.insert(characterConnections, character.DescendantAdded:Connect(watchCharacterVisual))
-        table.insert(characterConnections, character.Destroying:Connect(detachCharacter))
-        for _, node in ipairs(character:GetDescendants()) do watchCharacterVisual(node) end
+    -- Game adapters can explicitly identify an otherwise anonymous preview model.
+    -- Call for each newly created model; the returned function removes that binding.
+    function manager:RegisterPreview(model, player)
+        assert(self.Alive and model:IsA("Model") and previewScope(model), "preview must be a Model inside a watched ViewportFrame")
+        assert(player == LocalPlayer, "only local-player previews are supported yet")
+        watchPreview(model)
+        local record = previewModels[model]
+        local binding = {}
+        record.binding, record.player = binding, player
+        refreshPreview(model, record)
+        return function()
+            if previewModels[model] ~= record or record.binding ~= binding then return end
+            record.binding, record.player = nil, nil
+            refreshPreview(model, record)
+        end
     end
+
+    table.insert(connections, RunService.RenderStepped:Connect(function()
+        if characterMask then characterMask.Sync() end
+        for _, record in pairs(previewModels) do if record.mask then record.mask.Sync() end end
+    end))
 
     local gameStarted = false
     local function startGame()
         if gameStarted then return end
         gameStarted = true
-        table.insert(connections, RunService.RenderStepped:Connect(syncHeads))
         table.insert(connections, LocalPlayer.CharacterAdded:Connect(attachCharacter))
         table.insert(connections, LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
             if character == oldCharacter then detachCharacter() end
@@ -488,10 +610,8 @@ return function(Library)
         if not self.Alive then return end
         if self.Options.Enabled and self.Options.AffectGame then startGame() end
         for node, record in pairs(watched) do apply(node, record) end
-        for node, records in pairs(characterVisuals) do
-            for property, record in pairs(records.properties) do applyVisual(node, property, record) end
-        end
-        refreshFaces()
+        if characterMask then characterMask.Refresh() end
+        for model, record in pairs(previewModels) do refreshPreview(model, record) end
         for panel in pairs(panels) do
             for key, control in pairs(panel.Controls) do control:Set(self.Options[key], true) end
         end
@@ -587,6 +707,7 @@ return function(Library)
     function manager:Destroy()
         if not self.Alive then return end
         self.Alive = false
+        for model in pairs(previewModels) do forgetPreview(model) end
         detachCharacter()
         for node in pairs(watched) do forget(node, true) end
         for root, record in pairs(roots) do

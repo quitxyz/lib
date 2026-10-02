@@ -27,7 +27,12 @@ function node(class,parent,text)
  local props={ClassName=class,Text=text or '',Image='',RichText=false,Transparency=0,LocalTransparencyModifier=0,ImageTransparency=0,ZIndex=1,BackgroundColor3='original background',BackgroundTransparency=1,ImageColor3='original tint',ImageRectOffset='original offset',ImageRectSize='original rect'}
  local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal(),CharacterAdded=signal(),CharacterRemoving=signal()}
  local changed={}
+ local attributes={}
+ local attributeSignals={}
  local methods={}
+ function methods:GetAttribute(k) return attributes[k] end
+ function methods:GetAttributeChangedSignal(k) attributeSignals[k]=attributeSignals[k] or signal(); return attributeSignals[k] end
+ function methods:SetAttribute(k,v) attributes[k]=v; self:GetAttributeChangedSignal(k):Fire() end
  function methods:Clone() local copy=node(props.ClassName); return copy end
  function methods:IsA(c) return props.ClassName==c or (c=="BasePart" and (props.ClassName=="Part" or props.ClassName=="MeshPart")) end
  function methods:GetPropertyChangedSignal(k) changed[k]=changed[k] or signal(); return changed[k] end
@@ -276,8 +281,67 @@ local identity=p:GetAnonymousIdentity(); identity.Name='changed'; identity.Appea
 assert(p:GetAnonymousIdentity().Appearance.Face=='rbxassetid://144080495')
 assert(not pcall(function() p:SetAnonymous({Prefix='<b>oops</b>'}) end))
 p:SetAnonymous({Prefix='seized.cc/'})
+-- Existing/open, newly created, late-owned and explicitly registered previews.
+local viewport=node('ViewportFrame',playerGui)
+local camera=node('Camera',viewport); viewport.CurrentCamera=camera
+local function rig(parent,name)
+ local model=node('Model'); model.Name=name
+ local head=node('Part',model); head.Name='Head'; head.Color='skin'
+ local torso=node('Part',model); torso.Name='Torso'; torso.Color='skin'
+ local humanoid=node('Humanoid',model)
+ local accessory=node('Accessory',model); local hair=node('Part',accessory)
+ local clothes=node('Shirt',model); clothes.ShirtTemplate='outfit'
+ model.Parent=parent
+ return model,head,torso,hair,clothes
+end
+p:Restore()
+local copy,copyHead,copyTorso,copyHair,copyShirt=rig(viewport,'RealUser')
+assert(copyHair.Transparency==0 and copyShirt.ShirtTemplate=='outfit')
+p:SetOptions({Enabled=true})
+assert(copyHair.Transparency==1 and copyHair.LocalTransparencyModifier==0)
+assert(copyHead.Transparency==1 and copyTorso.Color=='255,255,255' and ownFace(copyHead))
+assert(copyShirt.ShirtTemplate=='' and viewport.CurrentCamera==camera)
+local lateAccessory=node('Accessory',copy); local lateHair=node('Part',lateAccessory)
+assert(lateHair.Transparency==1)
+copyShirt.ShirtTemplate='new outfit'; assert(copyShirt.ShirtTemplate=='')
+p:SetOptions({AffectGame=false})
+assert(copyHair.Transparency==0 and copyShirt.ShirtTemplate=='new outfit' and ownFace(copyHead)==nil)
+p:SetOptions({AffectGame=true})
+local unit,unitHead,unitTorso,unitHair=rig(viewport,'SomeUnit')
+assert(unitHair.Transparency==0 and unitHead.Transparency==0)
+unit:SetAttribute('UserId',123)
+assert(unitHair.Transparency==1)
+unit:SetAttribute('UserId',456)
+assert(unitHair.Transparency==0 and ownFace(unitHead)==nil)
+local unregister=p:RegisterPreview(unit,LocalPlayer)
+assert(unitHair.Transparency==1)
+unregister(); assert(unitHair.Transparency==0)
+copy.Parent=nil
+assert(copyHair.Transparency==0 and copyShirt.ShirtTemplate=='new outfit')
+copy.Parent=viewport; assert(copyHair.Transparency==1)
+copy.Name='SomeoneElse'; assert(copyHair.Transparency==0)
+copy.Name='RealUser'; assert(copyHair.Transparency==1)
+local facilityViewport=node('ViewportFrame',facilityGui)
+local facilityRig,facilityHead,facilityTorso,facilityHair=rig(facilityViewport,'RealUser')
+p:SetOptions({AffectGame=false}); assert(facilityHair.Transparency==1 and copyHair.Transparency==0)
+p:SetOptions({AffectFacility=false}); assert(facilityHair.Transparency==0)
+p:SetOptions({AffectGame=true,AffectFacility=true})
+-- A clone made while privacy was active includes the owned head and hidden real head.
+local inherited,inheritedReal=rig(nil,'RealUser')
+inheritedReal.Transparency=1
+local inheritedProxy=node('Part',inherited); inheritedProxy.Name='FacilityAnonymousHead'
+inherited.Parent=viewport
+local visibleHeads=0
+for _,child in ipairs(inherited:GetChildren()) do
+ if child.Name=='FacilityAnonymousHead' and child.Transparency==0 then visibleHeads=visibleHeads+1 end
+end
+assert(visibleHeads==1 and inheritedProxy.Transparency==1)
+local rebuilt,rebuiltHead,rebuiltTorso,rebuiltHair=rig(viewport,'RealUser')
+rebuilt:Destroy(); assert(rebuilt.Parent==nil)
 local doomed=label(playerGui,'RealUser'); doomed:Destroy()
 p:Destroy()
+assert(copyHair.Transparency==0 and copyShirt.ShirtTemplate=='new outfit')
+assert(facilityHair.Transparency==0 and ownFace(facilityHead)==nil)
 assert(gameLabel.Text=='Real Display has joined' and newLabel.Text=='Real Display is ready')
 assert(facilityLabel.Text=='teleport to RealUser')
 assert(not p.Alive and Library.PrivacyManager==nil)
