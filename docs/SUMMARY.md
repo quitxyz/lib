@@ -23,6 +23,7 @@
 
 * [Home manager](home-manager.md)
 * [Console manager](console-manager.md)
+* [Privacy manager](privacy-manager.md)
 
 * [Notifications](notifications.md)
 * [Configurations](save-manager.md)

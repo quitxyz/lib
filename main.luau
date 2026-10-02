@@ -18,7 +18,12 @@ local function GetPlayerGui()
 	return player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", 10)
 end
 
+local FacilityRoots = setmetatable({}, { __mode = "k" })
+local OnGuiCreated
+
 local function ParentGui(gui)
+	FacilityRoots[gui] = true
+	if OnGuiCreated then OnGuiCreated(gui) end
 	local ok = pcall(function()
 		if gethui then
 			gui.Parent = gethui()
@@ -129,8 +134,19 @@ Library.AddonPaths = {
 	ThemeManager = "addons/ThemeManager.luau",
 	HomeManager = "addons/HomeManager.luau",
 	ConsoleManager = "addons/ConsoleManager.luau",
+	PrivacyManager = "addons/PrivacyManager.luau",
 }
 Library.Addons = {}
+Library.GuiRoots = FacilityRoots
+OnGuiCreated = function(gui)
+    if Library.PrivacyManager then Library.PrivacyManager:WatchRoot(gui, "facility") end
+end
+
+function Library:ResolveText(text, scope, richText)
+    if self.PrivacyManager then return self.PrivacyManager:ResolveText(text, scope or "facility", richText) end
+    return text
+end
+
 Library.Painted = Painted
 Library.RepaintHooks = {}
 
@@ -4566,6 +4582,7 @@ Track(UserInputService.InputBegan:Connect(function(input, gpe)
 end))
 
 function Library:Destroy()
+	if self.PrivacyManager then self.PrivacyManager:Destroy() end
 	self.Destroying = true
 	for _, window in ipairs(self.Windows) do
 		for index = #(window.Modals or {}), 1, -1 do window.Modals[index]:Destroy() end

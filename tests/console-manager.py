@@ -29,6 +29,7 @@ Enum={AutomaticSize={Y=1},ScrollingDirection={Y=1},SortOrder={LayoutOrder=1},Tex
 task={delay=function(_,f) local t={f=f}; tasks[#tasks+1]=t; return t end,cancel=function(t) t.canceled=true end}
 function flush() while #tasks>0 do local batch=tasks; tasks={}; for _,t in ipairs(batch) do if not t.canceled then t.f() end end end end
 Library={Theme={Text='text',TextDim='dim',TextMarked='warn',Danger='error'},Connections={},RepaintHooks={},Painted={},FileSystem={EnsureFolder=function() return true end}}
+function Library:ResolveText(value) return value end
 function Library:OnRepaint(f) self.RepaintHooks[#self.RepaintHooks+1]=f; return f end
 function control(content,opts,floating)
  local n=new('Frame'); n.Parent=content.Container
@@ -123,6 +124,13 @@ LogService.MessageOut:Fire('ignored','print'); flush(); assert(#c:GetEntries()==
 c:SetCaptureRoblox(true); c:Print('<b>rich</b>'); LogService.MessageOut:Fire('<b>literal</b>','print'); flush()
 assert(rows(c)[2].RichText and not rows(c)[3].RichText)
 c:Toggle(); assert(c.Modal.Open); c:Toggle(); assert(not c.Modal.Open)
+local beforePrivacy=#c:GetEntries()
+function Library:ResolveText(value) local masked=value:gsub('RealUser','player 001'); return masked end
+c:SetOutput('both'); c:Print('RealUser'); flush()
+assert(c:GetEntries()[beforePrivacy+1].message=='RealUser')
+assert(c:Export(true):find('player 001') and not c:Export(true):find('RealUser'))
+assert(native[#native].message:find('player 001'))
+function Library:ResolveText(value) return value end
 c:Print('pending'); c:Destroy(); flush(); assert(not c.Alive and #c:GetEntries()==0)
 assert(#Library.Connections==baselineConnections and #Library.RepaintHooks==baselineHooks and #Library.Painted==baselinePainted)
 assert(#Window.Overlay:GetChildren()==0)

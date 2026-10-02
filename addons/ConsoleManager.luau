@@ -181,6 +181,7 @@ return function(Library)
 
                 local message = table.concat(values, " ", 1, values.n)
                 -- RichText is for the UI; native output should be readable plain text.
+                message = Library:ResolveText(message, "facility", true)
                 message = message:gsub("<[^>]*>", "")
 
                 local success = pcall(function()
@@ -368,7 +369,7 @@ return function(Library)
                 local entry = entries[index]
 
                 if matches(entry) then
-                    table.insert(lines, formatEntry(entry))
+                    table.insert(lines, Library:ResolveText(formatEntry(entry), "facility", entry.source == "Script" and opts.RichText ~= false))
                 end
             end
 
