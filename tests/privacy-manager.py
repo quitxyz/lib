@@ -112,7 +112,8 @@ function tab:Section()
   end
   function c:Input(opts)
    local t={Instance=node('Frame',parent),Options=opts,Value=opts.Default or ''}
-   function t:Set(v) self.Value=v; if opts.Callback then opts.Callback(v) end end
+   function t:Get() return self.Value end
+   function t:Set(v,silent) self.Value=v; if not silent and opts.Callback then opts.Callback(v) end end
    return t
   end
   c.Dropdown=c.Input
@@ -129,7 +130,7 @@ function tab:Section()
  local c=content(s.Frame); c.Frame=s.Frame; return c
 end
 function Window:Modal(opts)
- local m={Content=tab:Section(),Options=opts,Open=false}
+ local m={Content=tab:Section(),Options=opts,Open=false,Root=node('Frame',facilityGui)}
  function m:SetOpen(v) self.Open=v end
  function m:Destroy() self.Destroyed=true; self.Content.Frame:Destroy() end
  return m
@@ -311,6 +312,39 @@ local identity=p:GetAnonymousIdentity(); identity.Name='changed'; identity.Appea
 assert(p:GetAnonymousIdentity().Appearance.Face=='rbxassetid://144080495')
 assert(not pcall(function() p:SetAnonymous({Prefix='<b>oops</b>'}) end))
 p:SetAnonymous({Prefix='seized.cc/'})
+-- Custom identity: apply live fields, preserve independent scopes and appearance.
+panel.EditorControls.Username:Set('Alias')
+panel.EditorControls.DisplayName:Set('Custom Display')
+panel.EditorControls.UserId:Set('987')
+panel.EditorControls.Appearance:Set('keep mine')
+panel.EditorControls.Actions[2].Callback()
+assert(panel.EditorControls.Status.Value=='identity applied')
+assert(p.Options.Method=='custom' and p:GetName()=='Alias' and p:GetDisplayName()=='Custom Display' and p:GetUserId()==987)
+assert(facilityLabel.Text=='teleport to Alias' and gameLabel.Text=='Custom Display has joined')
+assert(avatar.Image==bust and preview(avatar)==nil and ownFace(newBody)==nil)
+assert(p:GetAvatar():find('id=123',1,true))
+assert(LocalPlayer.Name=='RealUser' and LocalPlayer.UserId==123)
+panel.EditorControls.Username:Set('unapplied'); assert(p:GetName()=='Alias')
+panel.EditorControls.UserId:Set('-2'); panel.EditorControls.Actions[2].Callback()
+assert(p:GetName()=='Alias' and p:GetUserId()==987 and panel.EditorControls.Status.Value~='identity applied')
+assert(not pcall(function() p:SetCustom({Name='changed',UserId=0/0}) end))
+assert(p:GetName()=='Alias')
+assert(not pcall(function() p:SetCustom({Name='<b>markup</b>'}) end))
+assert(not pcall(function() p:SetCustom({Appearance='loaded account'}) end))
+assert(not pcall(function() p:SetMethod('random') end))
+local customCopy=p:GetCustom(); customCopy.Name='external'; assert(p:GetName()=='Alias')
+p:SetCustom({Name='A&B',Appearance='anonymous'})
+assert(p:ResolveText('<b>RealUser</b>','facility',true)=='<b>A&amp;B</b>')
+assert(p:ResolveText('RealUser','facility',false)=='A&B')
+assert(avatar.Image=='' and ownFace(newBody))
+p:SetOptions({HideUsername=false}); assert(p:GetName()=='RealUser' and p:GetDisplayName()=='Custom Display')
+p:SetOptions({HideUsername=true,AffectFacility=false})
+assert(facilityLabel.Text=='teleport to RealUser' and gameLabel.Text=='Custom Display has joined')
+p:SetOptions({AffectFacility=true})
+p:Restore(); assert(p:GetName()=='RealUser' and avatar.Image==bust)
+p:SetOptions({Enabled=true}); assert(p:GetName()=='A&B')
+p:SetMethod('anonymous'); assert(p:GetName()=='seized.cc/1' and p:GetUserId()==0)
+assert(panel.MethodControl:Get()=='anonymous' and not panel.EditCustom.Visible)
 -- Existing/open, newly created, late-owned and explicitly registered previews.
 local viewport=node('ViewportFrame',playerGui)
 local camera=node('Camera',viewport); viewport.CurrentCamera=camera

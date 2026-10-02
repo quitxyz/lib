@@ -8,7 +8,7 @@ return function(Library)
     assert(LocalPlayer, "PrivacyManager requires a local player")
     local manager = { Alive = true, Options = {
         Enabled = false, HideUsername = true, HideDisplayName = true, HideAvatar = true, HideUserIds = true,
-        AffectFacility = true, AffectGame = false,
+        AffectFacility = true, AffectGame = false, Method = "anonymous",
     } }
     Library.PrivacyManager = manager
     local watched, roots, connections, panels = {}, {}, {}, {}
@@ -16,6 +16,41 @@ return function(Library)
     local anonymousName = anonymousPrefix .. "1"
     local anonymousAvatar = "rbxassetid://144080495"
     local anonymousColor = Color3.fromRGB(255, 255, 255)
+
+    local custom = { Name = "seized", DisplayName = "seized", UserId = 0, Appearance = "anonymous" }
+    local editorRoots = {}
+    local function replacementIdentity()
+        if manager.Options.Method == "custom" then return custom end
+        return { Name = anonymousName, DisplayName = anonymousName, UserId = 0, Appearance = "anonymous" }
+    end
+    local function hideAppearance()
+        return manager.Options.HideAvatar and replacementIdentity().Appearance ~= "keep mine"
+    end
+    function manager:GetCustom()
+        return { Name = custom.Name, DisplayName = custom.DisplayName, UserId = custom.UserId, Appearance = custom.Appearance }
+    end
+    function manager:SetCustom(values)
+        assert(self.Alive and type(values) == "table", "custom identity must be a table")
+        local nextIdentity = self:GetCustom()
+        for key, value in pairs(values) do
+            assert(nextIdentity[key] ~= nil, "unknown custom identity field: " .. tostring(key))
+            if key == "Name" or key == "DisplayName" then
+                assert(type(value) == "string" and #value <= 64 and value:find("%S")
+                    and not value:find("[%c<>]"), key .. " must be plain text, 1–64 bytes")
+            elseif key == "UserId" then
+                assert(type(value) == "number" and value >= 0 and value <= 9007199254740991
+                    and value == math.floor(value), "user id must be a non-negative whole number")
+            elseif key == "Appearance" then
+                assert(value == "anonymous" or value == "keep mine", "appearance must be anonymous or keep mine")
+            end
+            nextIdentity[key] = value
+        end
+        custom = nextIdentity
+        self:Refresh()
+    end
+    function manager:SetMethod(method)
+        self:SetOptions({ Method = method })
+    end
 
     function manager:GetAnonymousIdentity()
         return {
@@ -73,10 +108,11 @@ return function(Library)
     function manager:GetIdentity(player)
         player = player or LocalPlayer
         local enabled = self.Alive and self.Options.Enabled and player == LocalPlayer
+        local identity = replacementIdentity()
         return {
-            Name = enabled and self.Options.HideUsername and anonymousName or player.Name,
-            DisplayName = enabled and self.Options.HideDisplayName and anonymousName or player.DisplayName,
-            UserId = enabled and self.Options.HideUserIds and 0 or player.UserId,
+            Name = enabled and self.Options.HideUsername and identity.Name or player.Name,
+            DisplayName = enabled and self.Options.HideDisplayName and identity.DisplayName or player.DisplayName,
+            UserId = enabled and self.Options.HideUserIds and identity.UserId or player.UserId,
         }
     end
     function manager:GetName(player) return self:GetIdentity(player).Name end
@@ -89,13 +125,19 @@ return function(Library)
             if not self.Options.AffectGame then return value end
         elseif not self.Options.AffectFacility then return value end
         local names, replacements = {}, {}
-        if self.Options.HideUsername and LocalPlayer.Name ~= "" then table.insert(names, LocalPlayer.Name) end
-        if self.Options.HideDisplayName and LocalPlayer.DisplayName ~= "" then table.insert(names, LocalPlayer.DisplayName) end
-        if self.Options.HideUserIds then
-            local userId = tostring(LocalPlayer.UserId)
-            table.insert(names, userId)
-            replacements[userId] = "0"
+        local identity = replacementIdentity()
+        local function add(real, replacement)
+            if real == "" then return end
+            if replacements[real] == nil then table.insert(names, real) end
+            if richText then
+                replacement = replacement:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+            end
+            replacements[real] = replacement
         end
+        if self.Options.HideDisplayName then add(LocalPlayer.DisplayName, identity.DisplayName) end
+        -- A shared username/display-name token is ambiguous in generic text; username wins.
+        if self.Options.HideUsername then add(LocalPlayer.Name, identity.Name) end
+        if self.Options.HideUserIds then add(tostring(LocalPlayer.UserId), ("%.0f"):format(identity.UserId)) end
         if #names == 0 then return value end
         if not richText then return replaceTokens(value, names, replacements) end
         -- Preserve markup attributes; only replace visible text between tags.
@@ -112,7 +154,7 @@ return function(Library)
 
 
     function manager:ResolveImage(value, scope)
-        if type(value) ~= "string" or not self.Alive or not self.Options.Enabled or not self.Options.HideAvatar then return value end
+        if type(value) ~= "string" or not self.Alive or not self.Options.Enabled or not hideAppearance() then return value end
         if scope == "game" then
             if not self.Options.AffectGame then return value end
         elseif not self.Options.AffectFacility then return value end
@@ -130,7 +172,7 @@ return function(Library)
 
     function manager:GetAvatar(player)
         player = player or LocalPlayer
-        if self.Alive and self.Options.Enabled and self.Options.HideAvatar and player == LocalPlayer then
+        if self.Alive and self.Options.Enabled and hideAppearance() and player == LocalPlayer then
             return anonymousAvatar
         end
         return "rbxthumb://type=AvatarHeadShot&id=" .. player.UserId .. "&w=150&h=150"
@@ -140,6 +182,7 @@ return function(Library)
         local current = node
         local gameScope = false
         while current do
+            if editorRoots[current] then return nil end
             if Library.GuiRoots and Library.GuiRoots[current] then return "facility" end
             if roots[current] and roots[current].scope == "game" then gameScope = true end
             current = current.Parent
@@ -333,7 +376,7 @@ return function(Library)
         end
 
         local function characterEnabled()
-            return manager.Alive and manager.Options.Enabled and manager.Options.HideAvatar and enabled()
+            return manager.Alive and manager.Options.Enabled and hideAppearance() and enabled()
         end
 
         local function syncHeads()
@@ -614,13 +657,20 @@ return function(Library)
         for model, record in pairs(previewModels) do refreshPreview(model, record) end
         for panel in pairs(panels) do
             for key, control in pairs(panel.Controls) do control:Set(self.Options[key], true) end
+            panel.Method = self.Options.Method
+            if panel.MethodControl then panel.MethodControl:Set(panel.Method, true) end
+            if panel.EditCustom then panel.EditCustom:SetVisible(panel.Method == "custom") end
         end
     end
 
     function manager:SetOptions(options)
         assert(type(options) == "table", "privacy options must be a table")
         for key, value in pairs(options) do
-            assert(self.Options[key] ~= nil and type(value) == "boolean", "invalid privacy option: " .. tostring(key))
+            if key == "Method" then
+                assert(value == "anonymous" or value == "custom", "method must be anonymous or custom")
+            else
+                assert(self.Options[key] ~= nil and type(value) == "boolean", "invalid privacy option: " .. tostring(key))
+            end
         end
         for key, value in pairs(options) do self.Options[key] = value end
         self:Refresh()
@@ -648,20 +698,22 @@ return function(Library)
             panel.Controls[key] = control
             return control
         end
-        -- Layout preview: drafts stay local until custom identity resolution is implemented.
+        -- Edits remain a draft until apply; closing the editor keeps that draft.
         local editor = window:Modal({
             Title = labels.CustomTitle or "custom identity",
             Width = opts.EditorWidth or 420, Height = opts.EditorHeight or 0.86,
         })
         panel.CustomEditor = editor
-        panel.Draft = { Username = "seized", DisplayName = "seized", UserId = "0", Appearance = "anonymous", Badge = "default", BadgeText = "" }
+        editorRoots[editor.Root] = true
+        panel.Draft = { Username = custom.Name, DisplayName = custom.DisplayName, UserId = ("%.0f"):format(custom.UserId), Appearance = custom.Appearance, Badge = "default", BadgeText = "" }
         local draft, fields = panel.Draft, {}
         panel.EditorControls = fields
         local content = editor.Content
-        content:Label("layout preview · changes here do not apply to your identity yet")
+        content:Label("edit your identity, then apply. user identity must be enabled to display it.")
         content:Label("account")
         fields.Account = content:Input({ Text = "username or user id", Flag = false, Placeholder = "enter an account" })
         fields.Load = content:Button({ Text = "load account", Disabled = true })
+        content:Label("account loading is coming next")
         content:Divider()
         content:Label("identity")
         local updatePreview = function() end
@@ -675,9 +727,10 @@ return function(Library)
         content:Divider()
         content:Label("appearance")
         fields.Appearance = content:Dropdown({
-            Text = "avatar & character", Flag = false, Options = { "loaded account", "keep mine", "anonymous" }, Default = draft.Appearance,
+            Text = "avatar & character", Flag = false, Options = { "keep mine", "anonymous" }, Default = draft.Appearance,
             Callback = function(value) draft.Appearance = value; updatePreview() end,
         })
+        content:Label("badges · preview only for now")
         fields.Badge = content:Dropdown({
             Text = "badge", Flag = false, Options = { "default", "none", "verified", "premium", "developer", "administrator", "friend", "custom" }, Default = draft.Badge,
             Callback = function(value)
@@ -703,12 +756,23 @@ return function(Library)
                 .. "\nappearance: " .. draft.Appearance)
         end
         updatePreview()
-        content:ButtonRow({
+        fields.Status = content:Label("")
+        fields.Actions = content:ButtonRow({
             { Text = "close", Callback = function() editor:SetOpen(false) end },
-            { Text = "apply identity", Disabled = true },
+            { Text = "apply identity", Callback = function()
+                if not panel.Alive then return end
+                local ok, err = pcall(function()
+                    local idText = fields.UserId:Get():match("^%s*(.-)%s*$")
+                    assert(idText:match("^%d+$"), "user id must contain digits only")
+                    self:SetCustom({ Name = fields.Username:Get(), DisplayName = fields.DisplayName:Get(),
+                        UserId = tonumber(idText), Appearance = fields.Appearance:Get() })
+                    self:SetMethod("custom")
+                end)
+                fields.Status:Set(ok and "identity applied" or tostring(err))
+            end },
         })
         local editButton
-        panel.Method = "anonymous"
+        panel.Method = self.Options.Method
         toggle(section, "Enabled", "user identity"):Gear(function(content)
             toggle(content, "HideUsername", "hide username")
             toggle(content, "HideDisplayName", "hide display name")
@@ -719,8 +783,9 @@ return function(Library)
             toggle(content, "AffectGame", "affect game")
         end, { MaxHeight = opts.GearMaxHeight or 220 })
         panel.MethodControl = section:Dropdown({
-            Text = "method", Flag = false, Options = { "anonymous", "custom" }, Default = "anonymous",
+            Text = "method", Flag = false, Options = { "anonymous", "custom" }, Default = self.Options.Method,
             Callback = function(value)
+                self:SetMethod(value)
                 panel.Method = value
                 if editButton then editButton:SetVisible(value == "custom") end
             end,
@@ -729,7 +794,7 @@ return function(Library)
             Text = "edit custom identity",
             Callback = function() editor:SetOpen(true) end,
         })
-        editButton:SetVisible(false)
+        editButton:SetVisible(self.Options.Method == "custom")
         panel.EditCustom = editButton
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
@@ -742,6 +807,7 @@ return function(Library)
             if not self.Alive then return end
             self.Alive = false
             panels[self] = nil
+            editorRoots[editor.Root] = nil
             editor:Destroy()
             for _, connection in ipairs(ownedConnections) do
                 connection:Disconnect()
