@@ -444,10 +444,15 @@ return function(Library)
                 for _, record in ipairs(accountParts) do
                     local target = character:FindFirstChild(record.name)
                     if target and target:IsA("BasePart") then
+                        record.part.Anchored = true
+                        record.part.CanCollide, record.part.CanTouch, record.part.CanQuery = false, false, false
                         record.part.CFrame = target.CFrame * record.offset
                         record.part.LocalTransparencyModifier = isPreview and 0 or target.LocalTransparencyModifier
                     end
                 end
+                -- A sibling visual model keeps its Humanoid and parts out of the
+                -- real character hierarchy. Preview models remain in their WorldModel.
+                accountVisual.Parent = character.Parent
             end
             for head, visual in pairs(ownedHeads) do
                 if head.Parent == character then
@@ -501,7 +506,11 @@ return function(Library)
                             node.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
                         end
                     end
-                    accountVisual.Parent = character
+                    -- Part transforms are followed explicitly; cloned joints must not
+                    -- pull independently anchored visual parts into an assembly.
+                    for _, node in ipairs(accountVisual:GetDescendants()) do
+                        if node:IsA("JointInstance") or node:IsA("Constraint") then node:Destroy() end
+                    end
                 end
                 syncHeads()
                 return

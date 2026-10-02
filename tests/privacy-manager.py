@@ -103,6 +103,7 @@ function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
  local head=node('Part',model); head.Name='Head'; head.Color='loaded skin'
  local torso=node('Part',model); torso.Name='Torso'; torso.Color='loaded skin'
  local shirt=node('Shirt',model); shirt.ShirtTemplate='loaded shirt'
+ node('JointInstance',model); node('Constraint',model)
  return model
 end
 UserService={GetUserInfosByUserIdsAsync=function(_,ids)
@@ -381,8 +382,14 @@ panel.EditorControls.Actions[2].Callback()
 assert(panel.EditorControls.Status.Value=='identity applied' and p:GetName()=='Override')
 assert(p:GetDisplayName()=='Account Display' and p:GetUserId()==456)
 assert(avatar.Image:find('id=456',1,true) and p:GetAvatar():find('id=456',1,true))
-local loadedVisual=LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance')
+local loadedVisual=LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance')
 assert(loadedVisual and not ownFace(newBody))
+assert(not loadedVisual:IsDescendantOf(LocalPlayer.Character))
+assert(loadedVisual.Parent==LocalPlayer.Character.Parent)
+-- A collision state change on the visual is corrected on the next follow update.
+loadedVisual:FindFirstChild('Head').CanCollide=true
+RunService.RenderStepped:Fire()
+assert(loadedVisual:FindFirstChild('Head').CanCollide==false)
 local visualHumanoid=loadedVisual:FindFirstChildOfClass('Humanoid')
 assert(visualHumanoid.EvaluateStateMachine==false and visualHumanoid.AutoRotate==false)
 for _,part in ipairs(loadedVisual:GetDescendants()) do
@@ -391,14 +398,15 @@ for _,part in ipairs(loadedVisual:GetDescendants()) do
  end
 end
 -- The real humanoid is not altered by the visual rig's simulation settings.
+assert(not loadedVisual:FindFirstChildOfClass('JointInstance') and not loadedVisual:FindFirstChildOfClass('Constraint'))
 local actualHumanoid=LocalPlayer.Character:FindFirstChildOfClass('Humanoid')
 if actualHumanoid then assert(actualHumanoid.EvaluateStateMachine~=false) end
 assert(loadedVisual:FindFirstChild('Head').Color=='loaded skin')
 p:SetCustom({UserId=999}) -- numeric text override does not change the selected account appearance
 assert(p:GetUserId()==999 and p:GetAvatar():find('id=456',1,true))
 p:Restore(); assert(loadedVisual.Parent==nil and avatar.Image==bust)
-p:SetOptions({Enabled=true}); assert(LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance'))
-p:SetCustom({Appearance='keep mine'}); assert(not LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance'))
+p:SetOptions({Enabled=true}); assert(LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance'))
+p:SetCustom({Appearance='keep mine'}); assert(not LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance'))
 p:SetMethod('anonymous'); assert(ownFace(newBody))
 -- Existing/open, newly created, late-owned and explicitly registered previews.
 local viewport=node('ViewportFrame',playerGui)
@@ -421,10 +429,11 @@ assert(copyHair.Transparency==1 and copyHair.LocalTransparencyModifier==0)
 assert(copyHead.Transparency==1 and copyTorso.Color=='255,255,255' and ownFace(copyHead))
 assert(copyShirt.ShirtTemplate=='' and viewport.CurrentCamera==camera)
 p:SetCustom({AccountId=456,Appearance='loaded account'}); p:SetMethod('custom')
-assert(copy:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==1 and copyHair.Transparency==1)
-assert(copy:FindFirstChild('FacilityCustomAppearance'):FindFirstChildOfClass('Humanoid').EvaluateStateMachine==false)
+assert(copy.Parent:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==1 and copyHair.Transparency==1)
+assert(copy.Parent:FindFirstChild('FacilityCustomAppearance'):FindFirstChildOfClass('Humanoid').EvaluateStateMachine==false)
+assert(not copy.Parent:FindFirstChild('FacilityCustomAppearance'):IsDescendantOf(copy))
 RunService.RenderStepped:Fire()
-p:SetMethod('anonymous'); assert(not copy:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==0)
+p:SetMethod('anonymous'); assert(not copy.Parent:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==0)
 
 local lateAccessory=node('Accessory',copy); local lateHair=node('Part',lateAccessory)
 assert(lateHair.Transparency==1)
