@@ -30,6 +30,8 @@ lua.execute(source[start:end])
 lua.execute(r'''
 local legacy=Window:CreateFloating(190,false,nil)
 assert(legacy.Scroller==nil and legacy.Frame.AutomaticSize=='Y')
+Window.Gui=New('ScreenGui',{})
+Window.Gui.AbsolutePosition={Y=0}; Window.Gui.AbsoluteSize={Y=800}
 local p=Window:CreateFloating(190,false,nil,{MaxHeight=160})
 assert(p.Scroller.ClassName=='ScrollingFrame')
 assert(p.Scroller.ScrollingDirection=='Y' and p.Scroller.AutomaticCanvasSize=='Y')
@@ -44,6 +46,22 @@ p.Content.AbsoluteSize.Y=100; p.OnOpen()
 assert(p.Frame.Size.Y.Offset==62 and not p.Scroller.ScrollingEnabled)
 Theme.AccentDim='new color'; for _,hook in ipairs(Library.hooks) do hook() end
 assert(p.Scroller.ScrollBarImageColor3=='new color')
+-- Screen-space cap uses pixels divided by current UI scale.
+p.Frame.Visible=true; p.Frame.AbsolutePosition={Y=600}
+p.Content.AbsoluteSize.Y=600; p.Fit()
+assert(p.Frame.Size.Y.Offset==96 and p.Scroller.ScrollingEnabled)
+p.Frame.AbsolutePosition.Y=760; p.Frame.signals.AbsolutePosition:Fire()
+assert(p.Frame.Size.Y.Offset==16)
+p.Frame.AbsolutePosition.Y=790; p.Fit()
+assert(p.Frame.Size.Y.Offset==1 and p.Scroller.Size.Y.Offset==0)
+p.Frame.AbsolutePosition.Y=400; Window.Gui.signals.AbsoluteSize:Fire()
+assert(p.Frame.Size.Y.Offset==160)
+local dropdown=Window:CreateFloating(0,true,nil)
+assert(dropdown.Scroller and dropdown.Fit)
+dropdown.Frame.Visible=true; dropdown.Frame.AbsolutePosition={Y=600}
+dropdown.Content.AbsoluteSize.Y=400; dropdown.Fit()
+assert(dropdown.Frame.Size.Y.Offset==96)
+Window.Gui=nil
 local tiny=Window:CreateFloating(190,false,nil,{MaxHeight=10})
 tiny.Content.AbsoluteSize.Y=100; tiny.OnOpen(); assert(tiny.Frame.Size.Y.Offset==32)
 ''')

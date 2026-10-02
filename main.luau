@@ -2898,7 +2898,7 @@ function Window:CreateFloating(width, matchAnchor, parent, opts)
 	})
 	List(content, 6)
 	local panel = { Frame = frame, Content = content, MatchAnchor = matchAnchor, Parent = parent, Depth = depth }
-	local maxHeight = opts and tonumber(opts.MaxHeight)
+	local maxHeight = (opts and tonumber(opts.MaxHeight)) or (matchAnchor and math.huge)
 	if maxHeight then
 		maxHeight = math.max(32, maxHeight)
 		frame.AutomaticSize = Enum.AutomaticSize.None
@@ -2919,14 +2919,22 @@ function Window:CreateFloating(width, matchAnchor, parent, opts)
 		content.Parent = scroller
 		local function fit()
 			local naturalHeight = content.AbsoluteSize.Y / math.max(self.Scale.Scale, 0.001)
-			local height = math.min(naturalHeight, maxHeight - 12)
+			local limit = maxHeight
+			if frame.Visible and self.Gui then
+				local bottom = self.Gui.AbsolutePosition.Y + self.Gui.AbsoluteSize.Y - 8
+				limit = math.min(limit, math.max(0, (bottom - frame.AbsolutePosition.Y) / math.max(self.Scale.Scale, 0.001)))
+			end
+			local height = math.min(naturalHeight, math.max(0, limit - 12))
 			scroller.Size = UDim2.new(1, 0, 0, height)
 			scroller.ScrollingEnabled = naturalHeight > height
-			frame.Size = UDim2.new(frame.Size.X.Scale, frame.Size.X.Offset, 0, height + 12)
+			frame.Size = UDim2.new(frame.Size.X.Scale, frame.Size.X.Offset, 0, math.min(height + 12, limit))
 		end
 		Track(content:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit))
 		Track(self.Scale:GetPropertyChangedSignal("Scale"):Connect(fit))
+		Track(frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(fit))
+		if self.Gui then Track(self.Gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)) end
 		panel.OnOpen = fit
+		panel.Fit = fit
 		panel.Scroller = scroller
 		Library:OnRepaint(function() scroller.ScrollBarImageColor3 = Theme.AccentDim end)
 		fit()
@@ -2970,6 +2978,7 @@ function Window:ToggleFloating(panel, anchor, matchWidth)
 	table.insert(self.FloatStack, panel)
 	self.Blocker.Visible = true
 	if panel.OnOpen then panel.OnOpen() end
+	if panel.Fit then panel.Fit() end
 
 	local target = panel.Frame.Position
 	panel.Frame.Position = target - UDim2.fromOffset(0, 4)

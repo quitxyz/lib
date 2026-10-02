@@ -654,7 +654,7 @@ return function(Library)
             Width = opts.EditorWidth or 420, Height = opts.EditorHeight or 0.86,
         })
         panel.CustomEditor = editor
-        panel.Draft = { Username = "seized", DisplayName = "seized", UserId = "0", Appearance = "anonymous", Badge = "none", BadgeText = "" }
+        panel.Draft = { Username = "seized", DisplayName = "seized", UserId = "0", Appearance = "anonymous", Badge = "default", BadgeText = "" }
         local draft, fields = panel.Draft, {}
         panel.EditorControls = fields
         local content = editor.Content
@@ -679,7 +679,7 @@ return function(Library)
             Callback = function(value) draft.Appearance = value; updatePreview() end,
         })
         fields.Badge = content:Dropdown({
-            Text = "badge", Flag = false, Options = { "none", "verified", "custom" }, Default = draft.Badge,
+            Text = "badge", Flag = false, Options = { "default", "none", "verified", "premium", "developer", "administrator", "friend", "custom" }, Default = draft.Badge,
             Callback = function(value)
                 draft.Badge = value
                 if fields.BadgeText then fields.BadgeText.Instance.Visible = value == "custom" end
@@ -695,7 +695,10 @@ return function(Library)
         content:Label("preview")
         fields.Preview = content:Label("")
         updatePreview = function()
-            local badge = draft.Badge == "verified" and " ✓" or draft.Badge == "custom" and (" " .. draft.BadgeText) or ""
+            local badge = ""
+            if draft.Badge == "verified" then badge = " ✓"
+            elseif draft.Badge == "custom" then badge = " " .. draft.BadgeText
+            elseif draft.Badge ~= "none" then badge = " [" .. draft.Badge .. "]" end
             fields.Preview:Set(draft.DisplayName .. badge .. "\n@" .. draft.Username .. " · id " .. draft.UserId
                 .. "\nappearance: " .. draft.Appearance)
         end
@@ -714,21 +717,20 @@ return function(Library)
             content:Divider()
             toggle(content, "AffectFacility", "affect facility")
             toggle(content, "AffectGame", "affect game")
-            content:Divider()
-            panel.MethodControl = content:Dropdown({
-                Text = "method", Flag = false, Options = { "anonymous", "custom" }, Default = "anonymous",
-                Callback = function(value)
-                    panel.Method = value
-                    if editButton then editButton:SetVisible(value == "custom") end
-                end,
-            })
-            editButton = content:Button({
-                Text = "edit custom identity",
-                Callback = function() editor:SetOpen(true) end,
-            })
-            editButton:SetVisible(false)
-            panel.EditCustom = editButton
         end, { MaxHeight = opts.GearMaxHeight or 220 })
+        panel.MethodControl = section:Dropdown({
+            Text = "method", Flag = false, Options = { "anonymous", "custom" }, Default = "anonymous",
+            Callback = function(value)
+                panel.Method = value
+                if editButton then editButton:SetVisible(value == "custom") end
+            end,
+        })
+        editButton = section:Button({
+            Text = "edit custom identity",
+            Callback = function() editor:SetOpen(true) end,
+        })
+        editButton:SetVisible(false)
+        panel.EditCustom = editButton
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
         for i = repaintStart + 1, #Library.RepaintHooks do table.insert(hooks, Library.RepaintHooks[i]) end
