@@ -6,7 +6,7 @@ return function(Library)
     local LocalPlayer = Players.LocalPlayer
     assert(LocalPlayer, "PrivacyManager requires a local player")
     local manager = { Alive = true, Options = {
-        Enabled = false, HideUsername = true, HideDisplayName = true, HideAvatar = true,
+        Enabled = false, HideUsername = true, HideDisplayName = true, HideAvatar = true, HideUserIds = true,
         AffectFacility = true, AffectGame = false,
     } }
     Library.PrivacyManager = manager
@@ -17,11 +17,11 @@ return function(Library)
         return value ~= "" and (value:match("[%w_]") ~= nil or value:byte() >= 128)
     end
 
-    -- Match literal names with boundaries, longest first, without processing replacements again.
-    local function replaceNames(source, names)
+    -- Match literal identity tokens with boundaries; never reprocess replacements.
+    local function replaceTokens(source, names, replacements)
         local out, position = {}, 1
         while position <= #source do
-            local first, last
+            local first, last, replacement
             for _, name in ipairs(names) do
                 local search = position
                 while search <= #source do
@@ -29,7 +29,10 @@ return function(Library)
                     if not a then break end
                     local before, after = source:sub(a - 1, a - 1), source:sub(b + 1, b + 1)
                     if not wordByte(before) and not wordByte(after) then
-                        if not first or a < first or (a == first and b > last) then first, last = a, b end
+                        if not first or a < first or (a == first and b > last) then
+                            first, last = a, b
+                            replacement = replacements[name] or anonymousName
+                        end
                         break
                     end
                     search = b + 1
@@ -37,7 +40,7 @@ return function(Library)
             end
             if not first then table.insert(out, source:sub(position)); break end
             table.insert(out, source:sub(position, first - 1))
-            table.insert(out, anonymousName)
+            table.insert(out, replacement)
             position = last + 1
         end
         return table.concat(out)
@@ -49,28 +52,34 @@ return function(Library)
         return {
             Name = enabled and self.Options.HideUsername and anonymousName or player.Name,
             DisplayName = enabled and self.Options.HideDisplayName and anonymousName or player.DisplayName,
-            UserId = player.UserId,
+            UserId = enabled and self.Options.HideUserIds and 0 or player.UserId,
         }
     end
     function manager:GetName(player) return self:GetIdentity(player).Name end
     function manager:GetDisplayName(player) return self:GetIdentity(player).DisplayName end
+    function manager:GetUserId(player) return self:GetIdentity(player).UserId end
 
     function manager:ResolveText(value, scope, richText)
         if type(value) ~= "string" or not self.Alive or not self.Options.Enabled then return value end
         if scope == "game" then
             if not self.Options.AffectGame then return value end
         elseif not self.Options.AffectFacility then return value end
-        local names = {}
+        local names, replacements = {}, {}
         if self.Options.HideUsername and LocalPlayer.Name ~= "" then table.insert(names, LocalPlayer.Name) end
         if self.Options.HideDisplayName and LocalPlayer.DisplayName ~= "" then table.insert(names, LocalPlayer.DisplayName) end
+        if self.Options.HideUserIds then
+            local userId = tostring(LocalPlayer.UserId)
+            table.insert(names, userId)
+            replacements[userId] = "0"
+        end
         if #names == 0 then return value end
-        if not richText then return replaceNames(value, names) end
+        if not richText then return replaceTokens(value, names, replacements) end
         -- Preserve markup attributes; only replace visible text between tags.
         local out, position = {}, 1
         while position <= #value do
             local a, b = value:find("<[^>]*>", position)
-            if not a then table.insert(out, replaceNames(value:sub(position), names)); break end
-            table.insert(out, replaceNames(value:sub(position, a - 1), names))
+            if not a then table.insert(out, replaceTokens(value:sub(position), names, replacements)); break end
+            table.insert(out, replaceTokens(value:sub(position, a - 1), names, replacements))
             table.insert(out, value:sub(a, b))
             position = b + 1
         end
@@ -345,6 +354,7 @@ return function(Library)
             toggle(content, "HideUsername", "hide username")
             toggle(content, "HideDisplayName", "hide display name")
             toggle(content, "HideAvatar", "hide avatar")
+            toggle(content, "HideUserIds", "hide user ids")
             content:Divider()
             toggle(content, "AffectFacility", "affect facility")
             toggle(content, "AffectGame", "affect game")

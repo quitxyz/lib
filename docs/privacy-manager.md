@@ -1,6 +1,6 @@
 # PrivacyManager
 
-This version masks the local player's username, display name, and recognizable avatar thumbnails. It does not change Player.Name, Player.DisplayName, Player.UserId, character references, dropdown selection values, or gameplay targets.
+This version masks the local player's username, display name, user ID, and recognizable avatar thumbnails. It does not change Player.Name, Player.DisplayName, Player.UserId, character references, dropdown selection values, or gameplay targets.
 
 ## Setup
 
@@ -17,10 +17,11 @@ The section contains **user identity**, with a gear for:
 - hide username
 - hide display name
 - hide avatar
+- hide user ids
 - affect facility
 - affect game
 
-Defaults: identity masking off, both name fields and avatar masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing any gear option refreshes affected text automatically.
+Defaults: identity masking off, both name fields, avatar masking, and user ID masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing any gear option refreshes affected text automatically.
 
 Alternatively:
 
@@ -38,6 +39,7 @@ PrivacyManager:SetOptions({
     HideUsername = true,
     HideDisplayName = true,
     HideAvatar = true,
+    HideUserIds = true,
     AffectFacility = true,
     AffectGame = false,
 })
@@ -46,6 +48,7 @@ local identity = PrivacyManager:GetIdentity() -- local player by default
 local shownName = PrivacyManager:GetName(player)
 local shownDisplayName = PrivacyManager:GetDisplayName(player)
 local shownAvatar = PrivacyManager:GetAvatar(player)
+local shownId = PrivacyManager:GetUserId(player)
 local text = PrivacyManager:ResolveText("teleport to RealName", "facility", false)
 
 PrivacyManager:Refresh()
@@ -53,7 +56,7 @@ PrivacyManager:Restore() -- disable masking and restore text
 PrivacyManager:Destroy() -- restore, disconnect, remove owned panels
 ```
 
-The local replacement is always `player 001`. GetIdentity returns a new table containing Name, DisplayName, and the unchanged UserId. Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
+The local replacement is always `player 001`. GetIdentity returns a new table containing Name, DisplayName, and a display UserId (0 when local ID masking is enabled). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
 
 SetLibrary(Library) is accepted for consistency; a loaded manager belongs to its creating library and cannot be moved to another instance. Library:LoadAddon caches it. Destroy releases that cached instance so it may be loaded again.
 
@@ -83,13 +86,14 @@ PrivacyManager:BuildPrivacySection(settingsTab, 1, {
         HideUsername = "hide username",
         HideDisplayName = "hide display name",
         HideAvatar = "hide avatar",
+        HideUserIds = "hide user ids",
         AffectFacility = "affect facility",
         AffectGame = "affect game",
     },
 })
 ```
 
-BuildPrivacyTab also accepts Title and Icon. ID masking, other players, server information, custom/random identities, adapters, and replacement character identities are later steps.
+BuildPrivacyTab also accepts Title and Icon. Other players, server information, custom/random identities, adapters, and replacement character identities are later steps.
 
 ## Avatar thumbnails
 
@@ -116,3 +120,9 @@ PrivacyManager:BuildPrivacySection(settingsTab, 1, { GearMaxHeight = 160 })
 ```
 
 GearMaxHeight is optional and also works with BuildPrivacyTab. It caps the popup's total height and enables vertical wheel/touch scrolling when needed. Omit it for the previous natural-height behavior. The popup continues opening downward.
+
+## Displayed user IDs
+
+`HideUserIds` replaces the local player's decimal UserId with `0` in presentation text, using the same Facility/game scope switches and RichText handling as names. It is selected by default; the master privacy switch remains off by default. `GetUserId(player)` returns the display ID as a number and does not apply scope switches, matching the identity getters. GetIdentity also returns this display ID. Always use the real Player.UserId for gameplay, thumbnail lookup, and identity targeting.
+
+The generic matcher changes complete tokens only: `user id: 123` becomes `user id: 0`, while `1234`, `x123`, and `123_x` remain unchanged. RichText attributes, editable TextBoxes, registered selection values, and underlying game data are untouched. Existing console display, exports, and newly forwarded script logs use the shared resolver automatically. Originals are restored on disable/unload. A matching unrelated standalone number cannot be distinguished from a user ID in generic text and will also be masked. This option does not hide place, universe, or job IDs.
