@@ -17,10 +17,40 @@ return function(Library)
     local anonymousAvatar = "rbxassetid://144080495"
     local anonymousColor = Color3.fromRGB(255, 255, 255)
 
-    local custom = { Name = "seized", DisplayName = "seized", UserId = 0, Appearance = "anonymous" }
+    local custom = { Name = "seized", DisplayName = "seized", UserId = 0, Appearance = "anonymous", Badge = "default", BadgeText = "" }
     local editorRoots = {}
     local accounts = {}
     local loadingAccount = false
+    local accountBadges = {}
+    local badgeOptions = { "default", "none", "verified", "premium", "developer", "administrator", "star creator", "friend", "custom" }
+    local badgeText = {
+        verified = utf8.char(0xE000), premium = utf8.char(0xE001),
+        developer = "[developer]", administrator = "[administrator]",
+        ["star creator"] = "★", friend = "[friend]",
+    }
+    local inlineBadges = { utf8.char(0xE000), utf8.char(0xE001), "✓", "★",
+        "[premium]", "[developer]", "[administrator]", "[friend]" }
+    local badgeImages = {
+        ["rbxasset://textures/ui/icon_admin-16.png"] = true,
+        ["rbxasset://textures/ui/icon_intern-16.png"] = true,
+        ["rbxasset://textures/ui/icon_star-16.png"] = true,
+        ["rbxasset://textures/ui/icon_placeowner.png"] = true,
+        ["rbxasset://textures/ui/icon_friends_16.png"] = true,
+    }
+    -- nil means preserve existing badges; an empty string means remove them.
+    local function badgeFor(identity)
+        local kind = identity.Badge or "default"
+        if kind == "none" then return "" end
+        if kind == "custom" then return identity.BadgeText or "" end
+        if kind ~= "default" then return badgeText[kind] end
+        if not identity.AccountId then return nil end
+        local data = accountBadges[identity.AccountId] or {}
+        local badges = {}
+        for _, name in ipairs({ "verified", "premium", "developer", "friend" }) do
+            if data[name] then table.insert(badges, badgeText[name]) end
+        end
+        return table.concat(badges, " ")
+    end
 
     -- Loading returns draft data; it does not activate privacy or replace the current identity.
     function manager:LoadAccount(account)
@@ -50,8 +80,18 @@ return function(Library)
                 temporary = { description }
             end
             assert(self.Alive, "PrivacyManager was destroyed while loading")
+            local metadata = { verified = info.HasVerifiedBadge == true }
+            metadata.developer = game.CreatorType == Enum.CreatorType.User and game.CreatorId == id
+            local online = Players:GetPlayerByUserId(id)
+            if online then metadata.premium = online.MembershipType == Enum.MembershipType.Premium end
+            if id ~= LocalPlayer.UserId then
+                local success, friend = pcall(function() return LocalPlayer:IsFriendsWithAsync(id) end)
+                if success then metadata.friend = friend end
+            end
+            assert(self.Alive, "PrivacyManager was destroyed while loading")
+            accountBadges[id] = metadata
             return { Name = info.Username, DisplayName = info.DisplayName, UserId = id,
-                AccountId = id, Appearance = "loaded account" }
+                AccountId = id, Appearance = "loaded account", Badge = "default", BadgeText = "" }
         end)
         for _, item in ipairs(temporary) do item:Destroy() end
         loadingAccount = false
@@ -60,13 +100,13 @@ return function(Library)
     end
     local function replacementIdentity()
         if manager.Options.Method == "custom" then return custom end
-        return { Name = anonymousName, DisplayName = anonymousName, UserId = 0, Appearance = "anonymous" }
+        return { Name = anonymousName, DisplayName = anonymousName, UserId = 0, Appearance = "anonymous", Badge = "none", BadgeText = "" }
     end
     local function hideAppearance()
         return manager.Options.HideAvatar and replacementIdentity().Appearance ~= "keep mine"
     end
     function manager:GetCustom()
-        return { Name = custom.Name, DisplayName = custom.DisplayName, UserId = custom.UserId, Appearance = custom.Appearance, AccountId = custom.AccountId }
+        return { Name = custom.Name, DisplayName = custom.DisplayName, UserId = custom.UserId, Appearance = custom.Appearance, AccountId = custom.AccountId, Badge = custom.Badge, BadgeText = custom.BadgeText }
     end
     function manager:SetCustom(values)
         assert(self.Alive and type(values) == "table", "custom identity must be a table")
@@ -79,6 +119,10 @@ return function(Library)
             elseif key == "UserId" then
                 assert(type(value) == "number" and value >= 0 and value <= 9007199254740991
                     and value == math.floor(value), "user id must be a non-negative whole number")
+            elseif key == "Badge" then
+                assert(table.find(badgeOptions, value), "invalid badge style")
+            elseif key == "BadgeText" then
+                assert(type(value) == "string" and #value <= 64 and not value:find("[%c<>]"), "badge text must be plain text up to 64 bytes")
             elseif key == "AccountId" then
                 assert(type(value) == "number" and accounts[value], "load this account before selecting its appearance")
             elseif key == "Appearance" then
@@ -119,10 +163,10 @@ return function(Library)
     end
 
     -- Match literal identity tokens with boundaries; never reprocess replacements.
-    local function replaceTokens(source, names, replacements)
+    local function replaceTokens(source, names, replacements, badgeOwners)
         local out, position = {}, 1
         while position <= #source do
-            local first, last, replacement
+            local first, last, replacement, stripBadges
             for _, name in ipairs(names) do
                 local search = position
                 while search <= #source do
@@ -133,6 +177,7 @@ return function(Library)
                         if not first or a < first or (a == first and b > last) then
                             first, last = a, b
                             replacement = replacements[name] or anonymousName
+                            stripBadges = badgeOwners and badgeOwners[name]
                         end
                         break
                     end
@@ -140,6 +185,21 @@ return function(Library)
                 end
             end
             if not first then table.insert(out, source:sub(position)); break end
+            if stripBadges then
+                while true do
+                    local start = last + 1
+                    while source:sub(start, start) == " " do start = start + 1 end
+                    local consumed = false
+                    for _, symbol in ipairs(inlineBadges) do
+                        if source:sub(start, start + #symbol - 1) == symbol then
+                            last = start + #symbol - 1
+                            consumed = true
+                            break
+                        end
+                    end
+                    if not consumed then break end
+                end
+            end
             table.insert(out, source:sub(position, first - 1))
             table.insert(out, replacement)
             position = last + 1
@@ -155,10 +215,21 @@ return function(Library)
             Name = enabled and self.Options.HideUsername and identity.Name or player.Name,
             DisplayName = enabled and self.Options.HideDisplayName and identity.DisplayName or player.DisplayName,
             UserId = enabled and self.Options.HideUserIds and identity.UserId or player.UserId,
+            Badge = self:GetBadge(player),
         }
     end
     function manager:GetName(player) return self:GetIdentity(player).Name end
-    function manager:GetDisplayName(player) return self:GetIdentity(player).DisplayName end
+    function manager:GetBadge(player)
+        player = player or LocalPlayer
+        if not self.Alive or not self.Options.Enabled or player ~= LocalPlayer then return nil end
+        if self.Options.Method == "anonymous" and not self.Options.HideDisplayName then return nil end
+        return badgeFor(replacementIdentity())
+    end
+    function manager:GetDisplayName(player)
+        local name = self:GetIdentity(player).DisplayName
+        local badge = self:GetBadge(player)
+        return badge and badge ~= "" and (name .. " " .. badge) or name
+    end
     function manager:GetUserId(player) return self:GetIdentity(player).UserId end
 
     function manager:ResolveText(value, scope, richText)
@@ -166,7 +237,7 @@ return function(Library)
         if scope == "game" then
             if not self.Options.AffectGame then return value end
         elseif not self.Options.AffectFacility then return value end
-        local names, replacements = {}, {}
+        local names, replacements, badgeOwners = {}, {}, {}
         local identity = replacementIdentity()
         local function add(real, replacement)
             if real == "" then return end
@@ -176,18 +247,38 @@ return function(Library)
             end
             replacements[real] = replacement
         end
-        if self.Options.HideDisplayName then add(LocalPlayer.DisplayName, identity.DisplayName) end
-        -- A shared username/display-name token is ambiguous in generic text; username wins.
-        if self.Options.HideUsername then add(LocalPlayer.Name, identity.Name) end
+        local badge = self:GetBadge()
+        local function addName(real, replacement, decorate)
+            local displayed = replacement
+            if decorate and badge and badge ~= "" then displayed = displayed .. " " .. badge end
+            add(real, displayed)
+            if badge ~= nil then
+                badgeOwners[real] = true
+                for _, symbol in ipairs(inlineBadges) do
+                    local spaced, adjacent = real .. " " .. symbol, real .. symbol
+                    add(spaced, displayed); add(adjacent, displayed)
+                    badgeOwners[spaced], badgeOwners[adjacent] = true, true
+                end
+            end
+        end
+        if self.Options.HideUsername then addName(LocalPlayer.Name, identity.Name, false) end
+        if self.Options.HideDisplayName or badge ~= nil then
+            addName(LocalPlayer.DisplayName, self.Options.HideDisplayName and identity.DisplayName or LocalPlayer.DisplayName, true)
+        end
+        -- Explicit @usernames stay undecorated even when username and display name match.
+        if self.Options.HideUsername or (LocalPlayer.Name == LocalPlayer.DisplayName
+            and (self.Options.HideDisplayName or badge ~= nil)) then
+            addName("@" .. LocalPlayer.Name, "@" .. (self.Options.HideUsername and identity.Name or LocalPlayer.Name), false)
+        end
         if self.Options.HideUserIds then add(tostring(LocalPlayer.UserId), ("%.0f"):format(identity.UserId)) end
         if #names == 0 then return value end
-        if not richText then return replaceTokens(value, names, replacements) end
+        if not richText then return replaceTokens(value, names, replacements, badgeOwners) end
         -- Preserve markup attributes; only replace visible text between tags.
         local out, position = {}, 1
         while position <= #value do
             local a, b = value:find("<[^>]*>", position)
-            if not a then table.insert(out, replaceTokens(value:sub(position), names, replacements)); break end
-            table.insert(out, replaceTokens(value:sub(position, a - 1), names, replacements))
+            if not a then table.insert(out, replaceTokens(value:sub(position), names, replacements, badgeOwners)); break end
+            table.insert(out, replaceTokens(value:sub(position, a - 1), names, replacements, badgeOwners))
             table.insert(out, value:sub(a, b))
             position = b + 1
         end
@@ -323,6 +414,30 @@ return function(Library)
         viewport.Parent = node
     end
 
+    local function localBadgeOwner(node)
+        local parent = node.Parent
+        for _ = 1, 2 do
+            if not parent or parent:IsA("ScreenGui") or parent:IsA("PlayerGui") or parent:IsA("CoreGui") then break end
+            for _, key in ipairs({ "UserId", "PlayerUserId", "OwnerUserId" }) do
+                local id = parent:GetAttribute(key)
+                if id ~= nil then return tonumber(id) == LocalPlayer.UserId end
+            end
+            local candidates = { parent }
+            for _, child in ipairs(parent:GetChildren()) do table.insert(candidates, child) end
+            for _, candidate in ipairs(candidates) do
+                if candidate:IsA("TextLabel") or candidate:IsA("TextButton") then
+                    local record = watched[candidate]
+                    local text = record and record.original or candidate.Text
+                    if replaceTokens(text, { LocalPlayer.Name, LocalPlayer.DisplayName }, {
+                        [LocalPlayer.Name] = "", [LocalPlayer.DisplayName] = "",
+                    }) ~= text then return true end
+                end
+            end
+            parent = parent.Parent
+        end
+        return false
+    end
+
     local function apply(node, record)
         if record.writing then return end
         local scope = scopeOf(node)
@@ -330,6 +445,11 @@ return function(Library)
         if scope then
             if record.property == "Image" then
                 value = manager:ResolveImage(value, scope)
+                local affected = manager.Options.Enabled and ((scope == "game" and manager.Options.AffectGame)
+                    or (scope == "facility" and manager.Options.AffectFacility))
+                if affected and badgeImages[record.original] and manager:GetBadge() ~= nil and localBadgeOwner(node) then
+                    value = "" -- replace recognised local-row icons through the decorated name
+                end
             else
                 value = manager:ResolveText(value, scope, node.RichText)
             end
@@ -361,6 +481,14 @@ return function(Library)
         end
     end
 
+    local function refreshBadgeImages(parent)
+        if not parent then return end
+        for node, record in pairs(watched) do
+            if record.property == "Image" and badgeImages[record.original] and node:IsDescendantOf(parent) then
+                apply(node, record)
+            end
+        end
+    end
     local watchPreview
     local function watch(node)
         if watchPreview then watchPreview(node) end
@@ -375,6 +503,7 @@ return function(Library)
             if record.writing or node[property] == record.rendered then return end
             record.original = node[property]
             apply(node, record)
+            if property == "Text" then refreshBadgeImages(node.Parent) end
         end))
         if property == "Image" then
             for _, key in ipairs({ "ZIndex", "ImageTransparency" }) do
@@ -387,6 +516,7 @@ return function(Library)
         table.insert(record.connections, node.AncestryChanged:Connect(function() apply(node, record) end))
         table.insert(record.connections, node.Destroying:Connect(function() forget(node, false) end))
         apply(node, record)
+        if property == "Text" then refreshBadgeImages(node.Parent) end
     end
 
     function manager:WatchRoot(root, scope)
@@ -833,7 +963,7 @@ return function(Library)
         })
         panel.CustomEditor = editor
         editorRoots[editor.Root] = true
-        panel.Draft = { Username = custom.Name, DisplayName = custom.DisplayName, UserId = ("%.0f"):format(custom.UserId), Appearance = custom.Appearance, AccountId = custom.AccountId, Badge = "default", BadgeText = "" }
+        panel.Draft = { Username = custom.Name, DisplayName = custom.DisplayName, UserId = ("%.0f"):format(custom.UserId), Appearance = custom.Appearance, AccountId = custom.AccountId, Badge = custom.Badge, BadgeText = custom.BadgeText }
         local draft, fields = panel.Draft, {}
         panel.EditorControls = fields
         local content = editor.Content
@@ -853,10 +983,11 @@ return function(Library)
             if not ok then fields.LoadStatus:Set(tostring(identity)); return end
             draft.AccountId = identity.AccountId
             for key, value in pairs({ Username = identity.Name, DisplayName = identity.DisplayName,
-                UserId = ("%.0f"):format(identity.UserId), Appearance = identity.Appearance }) do
+                UserId = ("%.0f"):format(identity.UserId), Appearance = identity.Appearance, Badge = "default", BadgeText = "" }) do
                 draft[key] = value
                 fields[key]:Set(value, true)
             end
+            fields.BadgeText.Instance.Visible = false
             updatePreview()
             fields.LoadStatus:Set("account loaded · edit or apply identity")
         end })
@@ -875,9 +1006,9 @@ return function(Library)
             Text = "avatar & character", Flag = false, Options = { "loaded account", "keep mine", "anonymous" }, Default = draft.Appearance,
             Callback = function(value) draft.Appearance = value; updatePreview() end,
         })
-        content:Label("badges · preview only for now")
+        content:Label("badges")
         fields.Badge = content:Dropdown({
-            Text = "badge", Flag = false, Options = { "default", "none", "verified", "premium", "developer", "administrator", "friend", "custom" }, Default = draft.Badge,
+            Text = "badge", Flag = false, Options = badgeOptions, Default = draft.Badge,
             Callback = function(value)
                 draft.Badge = value
                 if fields.BadgeText then fields.BadgeText.Instance.Visible = value == "custom" end
@@ -885,18 +1016,16 @@ return function(Library)
             end,
         })
         fields.BadgeText = content:Input({
-            Text = "custom badge text", Flag = false, Placeholder = "enter a badge",
+            Text = "custom badge text", Flag = false, Placeholder = "enter a badge", Default = draft.BadgeText,
             Callback = function(value) draft.BadgeText = value; updatePreview() end,
         })
-        fields.BadgeText.Instance.Visible = false
+        fields.BadgeText.Instance.Visible = draft.Badge == "custom"
         content:Divider()
         content:Label("preview")
         fields.Preview = content:Label("")
         updatePreview = function()
-            local badge = ""
-            if draft.Badge == "verified" then badge = " ✓"
-            elseif draft.Badge == "custom" then badge = " " .. draft.BadgeText
-            elseif draft.Badge ~= "none" then badge = " [" .. draft.Badge .. "]" end
+            local resolved = badgeFor({ Badge = draft.Badge, BadgeText = draft.BadgeText, AccountId = draft.AccountId })
+            local badge = resolved and resolved ~= "" and (" " .. resolved) or ""
             fields.Preview:Set(draft.DisplayName .. badge .. "\n@" .. draft.Username .. " · id " .. draft.UserId
                 .. "\nappearance: " .. draft.Appearance)
         end
@@ -910,7 +1039,8 @@ return function(Library)
                     local idText = fields.UserId:Get():match("^%s*(.-)%s*$")
                     assert(idText:match("^%d+$"), "user id must contain digits only")
                     self:SetCustom({ Name = fields.Username:Get(), DisplayName = fields.DisplayName:Get(),
-                        UserId = tonumber(idText), Appearance = fields.Appearance:Get(), AccountId = draft.AccountId })
+                        UserId = tonumber(idText), Appearance = fields.Appearance:Get(), AccountId = draft.AccountId,
+                        Badge = fields.Badge:Get(), BadgeText = fields.BadgeText:Get() })
                     self:SetMethod("custom")
                 end)
                 fields.Status:Set(ok and "identity applied" or tostring(err))
@@ -1002,6 +1132,7 @@ return function(Library)
         end
         for _, connection in ipairs(connections) do connection:Disconnect() end
         for panel in pairs(panels) do panel:Destroy() end
+        table.clear(accountBadges)
         for id, rigs in pairs(accounts) do
             for _, rig in pairs(rigs) do rig:Destroy() end
             accounts[id] = nil

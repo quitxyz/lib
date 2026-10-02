@@ -56,7 +56,7 @@ PrivacyManager:Restore() -- disable masking and restore text
 PrivacyManager:Destroy() -- restore, disconnect, remove owned panels
 ```
 
-The local anonymous replacement defaults to `seized.cc/1`. SetAnonymous can change the prefix (for example `player ` produces `player 1`). GetIdentity returns a new table containing Name, DisplayName, and a display UserId (0 when local ID masking is enabled). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
+The local anonymous replacement defaults to `seized.cc/1`. SetAnonymous can change the prefix (for example `player ` produces `player 1`). GetIdentity returns a new table containing Name, DisplayName, Badge, and a display UserId (0 when local ID masking is enabled). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
 
 SetLibrary(Library) is accepted for consistency; a loaded manager belongs to its creating library and cannot be moved to another instance. Library:LoadAddon caches it. Destroy releases that cached instance so it may be loaded again.
 
@@ -123,7 +123,7 @@ GearMaxHeight is optional and also works with BuildPrivacyTab. It caps the popup
 
 ## Displayed user IDs
 
-`HideUserIds` replaces the local player's decimal UserId with `0` in presentation text, using the same Facility/game scope switches and RichText handling as names. It is selected by default; the master privacy switch remains off by default. `GetUserId(player)` returns the display ID as a number and does not apply scope switches, matching the identity getters. GetIdentity also returns this display ID. Always use the real Player.UserId for gameplay, thumbnail lookup, and identity targeting.
+`HideUserIds` replaces the local player's decimal UserId with the selected display ID (`0` for anonymous) in presentation text, using the same Facility/game scope switches and RichText handling as names. It is selected by default; the master privacy switch remains off by default. `GetUserId(player)` returns the display ID as a number and does not apply scope switches, matching the identity getters. GetIdentity also returns this display ID. Always use the real Player.UserId for gameplay, thumbnail lookup, and identity targeting.
 
 The generic matcher changes complete tokens only: `user id: 123` becomes `user id: 0`, while `1234`, `x123`, and `123_x` remain unchanged. RichText attributes, editable TextBoxes, registered selection values, and underlying game data are untouched. Existing console display, exports, and newly forwarded script logs use the shared resolver automatically. Originals are restored on disable/unload. A matching unrelated standalone number cannot be distinguished from a user ID in generic text and will also be masked. This option does not hide place, universe, or job IDs.
 
@@ -139,7 +139,7 @@ local identity = PrivacyManager:GetAnonymousIdentity()
 
 The returned identity is a fresh table, including a fresh Appearance table. Changing it does not modify the manager. Prefix accepts plain text up to 64 bytes (no control characters or angle brackets), and updates existing masked text immediately. The local identity reserves number 1; masking/numbering other players is a later step. This is a display label, so punctuation such as `seized.cc/` does not need to be a valid Roblox username.
 
-For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Manual custom identities are supported below. Badge application and randomised identities are not implemented yet.
+For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Manual custom identities are supported below. Badge application is described below. Randomised identities are not implemented yet.
 
 The face uses image texture 144080495, verified from Roblox's Smile face asset (144075659). The catalog face asset contains a Decal; its texture ID is the image used for both GUI images and character decals. The addon applies the face to its own classic head with Transparency 0. This avoids depending on the bundled `rbxasset://textures/face.png` path. The texture still requires Roblox asset loading; no automated mock test can verify its rendering on a particular device.
 
@@ -173,7 +173,7 @@ Select **custom**, open **edit custom identity**, enter a username, display name
 
 Appearance supports **anonymous** (the white classic appearance) and **keep mine** (restore the real thumbnails and character appearance while retaining text privacy). Switching back to anonymous restores the anonymous identity. Disabling privacy restores the original visuals.
 
-Draft edits only apply after pressing the button. Closing and reopening keeps the draft during the panel lifetime; this editor does not persist it to disk. Account loading is available as described below. Badge choices are preview-only and do not apply badges to game or Facility visuals yet.
+Draft edits only apply after pressing the button. Closing and reopening keeps the draft during the panel lifetime; this editor does not persist it to disk. Account loading is available as described below. Badge choices apply with the identity and refresh affected Facility/game visuals.
 
 The manual API accepts partial updates:
 
@@ -192,7 +192,7 @@ local identity = PrivacyManager:GetCustom() -- defensive copy
 
 SetCustom validates all supplied fields before applying any changes. Names must be nonblank plain text up to 64 bytes; IDs must be non-negative integers within the safe numeric range. Setting custom values does not automatically enable privacy or switch the method.
 
-Generic text containing identical real username/display-name tokens uses the username replacement because their meaning cannot be distinguished from text alone. Typed identity getters preserve the distinction.
+Generic text containing identical real username/display-name tokens uses the display-name replacement. Explicit @usernames stay undecorated and follow HideUsername. Typed identity getters preserve the distinction.
 
 BuildPrivacySection accepts EditorWidth (default 420) and EditorHeight (default 0.86). Its panel exposes CustomEditor, EditorControls and Draft. The editor itself is excluded from privacy replacement so its labels and draft preview remain readable. Destroying the panel destroys its editor.
 
@@ -217,3 +217,35 @@ LoadAccount returns Name, DisplayName, UserId, AccountId and Appearance. Account
 Recognised thumbnails preserve their original thumbnail type and resolution while switching the account ID. Live characters and recognised/registered game preview rigs receive a separate local visual model. It lives beside the original model, outside the real character hierarchy. Its body parts follow the original rig and accessories follow their attachment body parts. Cloned joints and constraints are removed after attachment offsets are captured, and each follow update keeps its parts anchored and non-collidable. The visual model’s Humanoid has EvaluateStateMachine disabled so it cannot apply forces or re-enable collisions; its parts are anchored and non-collidable. Avatar rendering remains available. Original character references, joints and physics remain intact; disabling masking removes the visual model and restores the tracked properties.
 
 Matching R6/R15 body parts are required. Custom rigs, unusual accessory attachments and differences in body proportions can require a game adapter. Native avatar inspection that independently fetches account data remains subject to the existing accessible/identifiable preview coverage.
+
+## Identity badges
+
+The custom editor badge selector is functional. Choose a style and press **apply identity**; edits remain a draft until applied. All styles are presentation-only, with the existing master privacy and Facility/game scope switches.
+
+| Style | Display |
+| --- | --- |
+| default | Available badge metadata from the loaded account; without a linked account, preserve existing source badges |
+| none | Remove recognised inline/local-row badges |
+| verified | Roblox verified text glyph |
+| premium | Roblox premium text glyph |
+| developer | [developer] |
+| administrator | [administrator] |
+| star creator | ★ |
+| friend | [friend] |
+| custom | Your plain text or symbol, up to 64 bytes |
+
+Developer, administrator and friend use readable text labels in generic name text; these are not reproductions of every native icon layout. Anonymous identities remove recognised badges by default. Badge overrides work independently of HideAvatar and HideDisplayName: you can retain a real name and still change its visual badge. @usernames remain plain.
+
+**Default account metadata:** verification comes from UserService account info. Experience creator is detected for a user-owned experience. Friendship is checked relative to the local player if available. Premium is read only when the loaded account has a Player in this server. Offline Premium, administrator and star creator status are not inferred. Those styles remain selectable manually. Changing the displayed UserId does not change the linked account's badge metadata.
+
+GetIdentity().DisplayName remains undecorated and GetIdentity().Badge contains the chosen badge text. GetDisplayName() includes the badge suffix. GetBadge() returns nil when preserving original badges, an empty string for none, or the selected badge text. Identity getters ignore visual scope; ResolveText and automatic watchers apply scope switches.
+
+```lua
+PrivacyManager:SetCustom({ Badge = "verified" })
+PrivacyManager:SetCustom({ Badge = "custom", BadgeText = "★ seized" })
+PrivacyManager:SetCustom({ Badge = "default" })
+```
+
+Text resolution replaces recognised adjacent inline badges instead of appending duplicates, preserves RichText markup, and escapes custom text. The watcher hides recognised Roblox admin/intern/star/creator/friend image assets only in identifiable local-player rows, showing the selected style in the name instead. It restores source text/images when privacy or that scope is disabled. Unrelated player rows and arbitrary art are untouched.
+
+Custom icon assets, sprite sheets and game-specific badge containers are not guessed. Such layouts can need a game adapter. Badge glyph rendering depends on the UI font. This manager does not change Player.HasVerifiedBadge, memberships or other actual account properties.
