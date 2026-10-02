@@ -108,3 +108,11 @@ The temporary anonymous appearance uses gray body colors, clears ordinary MeshPa
 Original visual property values are tracked per instance. External updates become the latest originals while masking is active. Turning off identity privacy, hide avatar, or affect game restores those values; unload does the same and disconnects listeners. The manager follows CharacterAdded/CharacterRemoving, restores the old character, and watches new descendants on each respawn. Facility-only privacy does not mask the character.
 
 This is a neutral visual treatment, not a complete generic avatar replacement. Body silhouettes remain recognizable. SurfaceAppearance/PBR textures, custom character renderers, and ViewportFrame models may retain visual details and are not covered by this version. Predefined anonymous characters, chosen custom appearances, and random identity appearances are later work. Changes are made on the local client and do not change what other players see.
+
+## Gear height
+
+```lua
+PrivacyManager:BuildPrivacySection(settingsTab, 1, { GearMaxHeight = 160 })
+```
+
+GearMaxHeight is optional and also works with BuildPrivacyTab. It caps the popup's total height and enables vertical wheel/touch scrolling when needed. Omit it for the previous natural-height behavior. The popup continues opening downward.

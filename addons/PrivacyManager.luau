@@ -348,7 +348,7 @@ return function(Library)
             content:Divider()
             toggle(content, "AffectFacility", "affect facility")
             toggle(content, "AffectGame", "affect game")
-        end)
+        end, { MaxHeight = opts.GearMaxHeight })
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
         for i = repaintStart + 1, #Library.RepaintHooks do table.insert(hooks, Library.RepaintHooks[i]) end

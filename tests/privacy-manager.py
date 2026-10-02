@@ -94,7 +94,7 @@ function tab:Section()
   function c:Toggle(opts)
    local t={Options=opts,Value=opts.Default}
    function t:Set(v,silent) self.Value=v; if not silent then opts.Callback(v) end end
-   function t:Gear(builder) local frame=node('Frame',Window.Overlay); builder(content(frame)); return self end
+   function t:Gear(builder,gearOpts) self.GearOptions=gearOpts; local frame=node('Frame',Window.Overlay); builder(content(frame)); return self end
    return t
   end
   function c:Divider() end
@@ -108,7 +108,8 @@ lua.execute(r"""
 local p=factory(Library)
 assert(factory(Library)==p)
 assert(facilityLabel.Text=='teleport to RealUser')
-local panel=p:BuildPrivacySection(tab,1)
+local panel=p:BuildPrivacySection(tab,1,{GearMaxHeight=160})
+assert(panel.Controls.Enabled.GearOptions.MaxHeight==160)
 panel.Controls.Enabled:Set(true)
 assert(facilityLabel.Text=='teleport to player 001')
 assert(gameLabel.Text=='Real Display has joined')

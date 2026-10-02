@@ -1202,7 +1202,7 @@ function Elements:Toggle(opts)
 		return api
 	end
 
-	function api:Gear(builder)
+	function api:Gear(builder, opts)
 		local gear = New("ImageButton", {
 			Size = UDim2.fromOffset(14, 14),
 			BackgroundTransparency = 1,
@@ -1211,7 +1211,7 @@ function Elements:Toggle(opts)
 			LayoutOrder = 30,
 			Parent = right,
 		})
-		local panel = owner.Window:CreateFloating(190, false, owner.Float)
+		local panel = owner.Window:CreateFloating(190, false, owner.Float, opts)
 		local content = NewContainer(owner.Window, panel.Content, panel)
 		if builder then builder(content) end
 		Track(gear.MouseEnter:Connect(function()
@@ -2873,7 +2873,7 @@ end
 local Window = {}
 Window.__index = Window
 
-function Window:CreateFloating(width, matchAnchor, parent)
+function Window:CreateFloating(width, matchAnchor, parent, opts)
 	local depth = parent and (parent.Depth + 1) or 1
 	local z = 118 + depth * 4
 	local frame = New("Frame", {
@@ -2897,7 +2897,41 @@ function Window:CreateFloating(width, matchAnchor, parent)
 		Parent = frame,
 	})
 	List(content, 6)
-	return { Frame = frame, Content = content, MatchAnchor = matchAnchor, Parent = parent, Depth = depth }
+	local panel = { Frame = frame, Content = content, MatchAnchor = matchAnchor, Parent = parent, Depth = depth }
+	local maxHeight = opts and tonumber(opts.MaxHeight)
+	if maxHeight then
+		maxHeight = math.max(32, maxHeight)
+		frame.AutomaticSize = Enum.AutomaticSize.None
+		local scroller = New("ScrollingFrame", {
+			Size = UDim2.new(1, 0, 0, 0),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			CanvasSize = UDim2.new(),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			ScrollBarThickness = 2,
+			ScrollBarImageColor3 = Theme.AccentDim,
+			ClipsDescendants = true,
+			ZIndex = z,
+			Parent = frame,
+		})
+		content.Size = UDim2.new(1, -6, 0, 0)
+		content.Parent = scroller
+		local function fit()
+			local naturalHeight = content.AbsoluteSize.Y / math.max(self.Scale.Scale, 0.001)
+			local height = math.min(naturalHeight, maxHeight - 12)
+			scroller.Size = UDim2.new(1, 0, 0, height)
+			scroller.ScrollingEnabled = naturalHeight > height
+			frame.Size = UDim2.new(frame.Size.X.Scale, frame.Size.X.Offset, 0, height + 12)
+		end
+		Track(content:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit))
+		Track(self.Scale:GetPropertyChangedSignal("Scale"):Connect(fit))
+		panel.OnOpen = fit
+		panel.Scroller = scroller
+		Library:OnRepaint(function() scroller.ScrollBarImageColor3 = Theme.AccentDim end)
+		fit()
+	end
+	return panel
 end
 
 function Window:CloseFloatingFrom(depth)

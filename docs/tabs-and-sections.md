@@ -58,3 +58,15 @@ section:Divider()
 ```
 
 Gear popups expose exactly the same methods, so any element can be nested inside one.
+
+
+Gear panels can optionally cap their total height (including padding):
+
+```lua
+section:Toggle({ Text = "options", Flag = false }):Gear(function(content)
+    content:Toggle({ Text = "first option", Flag = false })
+    -- More controls...
+end, { MaxHeight = 220 })
+```
+
+Without MaxHeight, the panel keeps its natural height. With it, shorter contents shrink to fit and taller contents scroll vertically by wheel or touch. Heights use logical UI pixels before scaling, with a minimum cap of 32. Panels continue opening below the gear. A cap does not automatically fit the available screen space; choose a smaller value when the gear is near the bottom.
