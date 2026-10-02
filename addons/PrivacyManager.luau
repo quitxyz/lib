@@ -493,7 +493,13 @@ return function(Library)
                             node.CanCollide, node.CanTouch, node.CanQuery = false, false, false
                             if node.Name == "HumanoidRootPart" then node.Transparency = 1 end
                         elseif node:IsA("Script") or node:IsA("LocalScript") then node:Destroy()
-                        elseif node:IsA("Humanoid") then node.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end
+                        elseif node:IsA("Humanoid") then
+                            -- Keep avatar rendering, but prevent this visual rig from enabling
+                            -- collisions or applying Humanoid forces after it enters Workspace.
+                            node.EvaluateStateMachine = false
+                            node.AutoRotate = false
+                            node.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+                        end
                     end
                     accountVisual.Parent = character
                 end

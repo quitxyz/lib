@@ -383,6 +383,16 @@ assert(p:GetDisplayName()=='Account Display' and p:GetUserId()==456)
 assert(avatar.Image:find('id=456',1,true) and p:GetAvatar():find('id=456',1,true))
 local loadedVisual=LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance')
 assert(loadedVisual and not ownFace(newBody))
+local visualHumanoid=loadedVisual:FindFirstChildOfClass('Humanoid')
+assert(visualHumanoid.EvaluateStateMachine==false and visualHumanoid.AutoRotate==false)
+for _,part in ipairs(loadedVisual:GetDescendants()) do
+ if part:IsA('BasePart') then
+  assert(part.Anchored and part.CanCollide==false and part.CanTouch==false and part.CanQuery==false)
+ end
+end
+-- The real humanoid is not altered by the visual rig's simulation settings.
+local actualHumanoid=LocalPlayer.Character:FindFirstChildOfClass('Humanoid')
+if actualHumanoid then assert(actualHumanoid.EvaluateStateMachine~=false) end
 assert(loadedVisual:FindFirstChild('Head').Color=='loaded skin')
 p:SetCustom({UserId=999}) -- numeric text override does not change the selected account appearance
 assert(p:GetUserId()==999 and p:GetAvatar():find('id=456',1,true))
@@ -412,6 +422,7 @@ assert(copyHead.Transparency==1 and copyTorso.Color=='255,255,255' and ownFace(c
 assert(copyShirt.ShirtTemplate=='' and viewport.CurrentCamera==camera)
 p:SetCustom({AccountId=456,Appearance='loaded account'}); p:SetMethod('custom')
 assert(copy:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==1 and copyHair.Transparency==1)
+assert(copy:FindFirstChild('FacilityCustomAppearance'):FindFirstChildOfClass('Humanoid').EvaluateStateMachine==false)
 RunService.RenderStepped:Fire()
 p:SetMethod('anonymous'); assert(not copy:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==0)
 
