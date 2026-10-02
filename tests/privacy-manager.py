@@ -110,10 +110,29 @@ function tab:Section()
    function t:Gear(builder,gearOpts) self.GearOptions=gearOpts; local frame=node('Frame',Window.Overlay); builder(content(frame)); return self end
    return t
   end
+  function c:Input(opts)
+   local t={Instance=node('Frame',parent),Options=opts,Value=opts.Default or ''}
+   function t:Set(v) self.Value=v; if opts.Callback then opts.Callback(v) end end
+   return t
+  end
+  c.Dropdown=c.Input
+  function c:Button(opts)
+   local t={Options=opts,Visible=true}; function t:SetVisible(v) self.Visible=v end; return t
+  end
+  function c:ButtonRow(opts) return opts end
+  function c:Label(value)
+   local t={Value=value}; function t:Set(v) self.Value=v end; return t
+  end
   function c:Divider() end
   return c
  end
  local c=content(s.Frame); c.Frame=s.Frame; return c
+end
+function Window:Modal(opts)
+ local m={Content=tab:Section(),Options=opts,Open=false}
+ function m:SetOpen(v) self.Open=v end
+ function m:Destroy() self.Destroyed=true; self.Content.Frame:Destroy() end
+ return m
 end
 """)
 lua.globals().factory=lua.execute((root/'addons/PrivacyManager.luau').read_text())
@@ -123,6 +142,17 @@ assert(factory(Library)==p)
 assert(facilityLabel.Text=='teleport to RealUser')
 local panel=p:BuildPrivacySection(tab,1,{GearMaxHeight=160})
 assert(panel.Controls.Enabled.GearOptions.MaxHeight==160)
+assert(not panel.EditCustom.Visible)
+panel.MethodControl:Set('custom'); assert(panel.EditCustom.Visible)
+panel.EditCustom.Options.Callback(); assert(panel.CustomEditor.Open)
+panel.EditorControls.DisplayName:Set('test name')
+assert(panel.EditorControls.Preview.Value:find('test name',1,true))
+panel.EditorControls.Badge:Set('custom'); assert(panel.EditorControls.BadgeText.Instance.Visible)
+panel.EditorControls.BadgeText:Set('tester')
+assert(panel.EditorControls.Preview.Value:find('test name tester',1,true))
+assert(panel.EditorControls.Load.Options.Disabled)
+assert(p:GetName()=='RealUser')
+panel.MethodControl:Set('anonymous'); assert(not panel.EditCustom.Visible)
 panel.Controls.Enabled:Set(true)
 assert(facilityLabel.Text=='teleport to seized.cc/1')
 assert(gameLabel.Text=='Real Display has joined')

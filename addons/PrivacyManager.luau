@@ -648,6 +648,64 @@ return function(Library)
             panel.Controls[key] = control
             return control
         end
+        -- Layout preview: drafts stay local until custom identity resolution is implemented.
+        local editor = window:Modal({
+            Title = labels.CustomTitle or "custom identity",
+            Width = opts.EditorWidth or 420, Height = opts.EditorHeight or 0.86,
+        })
+        panel.CustomEditor = editor
+        panel.Draft = { Username = "seized", DisplayName = "seized", UserId = "0", Appearance = "anonymous", Badge = "none", BadgeText = "" }
+        local draft, fields = panel.Draft, {}
+        panel.EditorControls = fields
+        local content = editor.Content
+        content:Label("layout preview · changes here do not apply to your identity yet")
+        content:Label("account")
+        fields.Account = content:Input({ Text = "username or user id", Flag = false, Placeholder = "enter an account" })
+        fields.Load = content:Button({ Text = "load account", Disabled = true })
+        content:Divider()
+        content:Label("identity")
+        local updatePreview = function() end
+        for _, field in ipairs({ { "Username", "username" }, { "DisplayName", "display name" }, { "UserId", "user id" } }) do
+            local key = field[1]
+            fields[key] = content:Input({
+                Text = field[2], Flag = false, Default = draft[key],
+                Callback = function(value) draft[key] = value; updatePreview() end,
+            })
+        end
+        content:Divider()
+        content:Label("appearance")
+        fields.Appearance = content:Dropdown({
+            Text = "avatar & character", Flag = false, Options = { "loaded account", "keep mine", "anonymous" }, Default = draft.Appearance,
+            Callback = function(value) draft.Appearance = value; updatePreview() end,
+        })
+        fields.Badge = content:Dropdown({
+            Text = "badge", Flag = false, Options = { "none", "verified", "custom" }, Default = draft.Badge,
+            Callback = function(value)
+                draft.Badge = value
+                if fields.BadgeText then fields.BadgeText.Instance.Visible = value == "custom" end
+                updatePreview()
+            end,
+        })
+        fields.BadgeText = content:Input({
+            Text = "custom badge text", Flag = false, Placeholder = "enter a badge",
+            Callback = function(value) draft.BadgeText = value; updatePreview() end,
+        })
+        fields.BadgeText.Instance.Visible = false
+        content:Divider()
+        content:Label("preview")
+        fields.Preview = content:Label("")
+        updatePreview = function()
+            local badge = draft.Badge == "verified" and " ✓" or draft.Badge == "custom" and (" " .. draft.BadgeText) or ""
+            fields.Preview:Set(draft.DisplayName .. badge .. "\n@" .. draft.Username .. " · id " .. draft.UserId
+                .. "\nappearance: " .. draft.Appearance)
+        end
+        updatePreview()
+        content:ButtonRow({
+            { Text = "close", Callback = function() editor:SetOpen(false) end },
+            { Text = "apply identity", Disabled = true },
+        })
+        local editButton
+        panel.Method = "anonymous"
         toggle(section, "Enabled", "user identity"):Gear(function(content)
             toggle(content, "HideUsername", "hide username")
             toggle(content, "HideDisplayName", "hide display name")
@@ -656,7 +714,21 @@ return function(Library)
             content:Divider()
             toggle(content, "AffectFacility", "affect facility")
             toggle(content, "AffectGame", "affect game")
-        end, { MaxHeight = opts.GearMaxHeight })
+            content:Divider()
+            panel.MethodControl = content:Dropdown({
+                Text = "method", Flag = false, Options = { "anonymous", "custom" }, Default = "anonymous",
+                Callback = function(value)
+                    panel.Method = value
+                    if editButton then editButton:SetVisible(value == "custom") end
+                end,
+            })
+            editButton = content:Button({
+                Text = "edit custom identity",
+                Callback = function() editor:SetOpen(true) end,
+            })
+            editButton:SetVisible(false)
+            panel.EditCustom = editButton
+        end, { MaxHeight = opts.GearMaxHeight or 220 })
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
         for i = repaintStart + 1, #Library.RepaintHooks do table.insert(hooks, Library.RepaintHooks[i]) end
@@ -668,6 +740,7 @@ return function(Library)
             if not self.Alive then return end
             self.Alive = false
             panels[self] = nil
+            editor:Destroy()
             for _, connection in ipairs(ownedConnections) do
                 connection:Disconnect()
                 local index = table.find(Library.Connections, connection)
