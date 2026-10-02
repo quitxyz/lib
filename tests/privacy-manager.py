@@ -5,9 +5,11 @@ root=Path(__file__).resolve().parents[1]
 lua=LuaRuntime()
 lua.execute(r"""
 Vector2={zero="zero vector"}
-Enum={NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
+Enum={HumanoidRigType={R6="R6",R15="R15"},HumanoidDisplayDistanceType={None="None"},NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
 Vector3={new=function(x,y,z) return {X=x,Y=y,Z=z} end,zero={X=0,Y=0,Z=0}}
-CFrame={new=function(...) return {position={...}} end,lookAt=function(a,b) return {eye=a,target=b} end}
+local cfMeta={__mul=function(a,b) return b end}
+function cf(...) return setmetatable({position={...},ToObjectSpace=function(_,v) return v end},cfMeta) end
+CFrame={new=cf,lookAt=function(a,b) return {eye=a,target=b} end}
 UDim2={fromScale=function(x,y) return {x=x,y=y} end}
 Color3={fromRGB=function(r,g,b) return r .. "," .. g .. "," .. b end}
 table.clear=function(t) for k in pairs(t) do t[k]=nil end end
@@ -24,7 +26,7 @@ function signal()
 end
 nodes={}
 function node(class,parent,text)
- local props={ClassName=class,Text=text or '',Image='',RichText=false,Transparency=0,LocalTransparencyModifier=0,ImageTransparency=0,ZIndex=1,BackgroundColor3='original background',BackgroundTransparency=1,ImageColor3='original tint',ImageRectOffset='original offset',ImageRectSize='original rect'}
+ local props={CFrame=CFrame.new(),ClassName=class,Text=text or '',Image='',RichText=false,Transparency=0,LocalTransparencyModifier=0,ImageTransparency=0,ZIndex=1,BackgroundColor3='original background',BackgroundTransparency=1,ImageColor3='original tint',ImageRectOffset='original offset',ImageRectSize='original rect'}
  local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal(),CharacterAdded=signal(),CharacterRemoving=signal()}
  local changed={}
  local attributes={}
@@ -33,7 +35,15 @@ function node(class,parent,text)
  function methods:GetAttribute(k) return attributes[k] end
  function methods:GetAttributeChangedSignal(k) attributeSignals[k]=attributeSignals[k] or signal(); return attributeSignals[k] end
  function methods:SetAttribute(k,v) attributes[k]=v; self:GetAttributeChangedSignal(k):Fire() end
- function methods:Clone() local copy=node(props.ClassName); return copy end
+ function methods:Clone()
+  local copy=node(props.ClassName)
+  for k,v in pairs(props) do if k~='Parent' and k~='dead' then copy[k]=v end end
+  for _,child in ipairs(self:GetChildren()) do child:Clone().Parent=copy end
+  return copy
+ end
+ function methods:FindFirstChild(name)
+  for _,v in ipairs(self:GetChildren()) do if v.Name==name then return v end end
+ end
  function methods:IsA(c) return props.ClassName==c or (c=="BasePart" and (props.ClassName=="Part" or props.ClassName=="MeshPart")) end
  function methods:GetPropertyChangedSignal(k) changed[k]=changed[k] or signal(); return changed[k] end
  function methods:IsDescendantOf(root)
@@ -86,9 +96,21 @@ handle=node('Part',hat); handle.LocalTransparencyModifier=0
 sparkles=node('ParticleEmitter',handle); sparkles.Enabled=true
 tool=node('Tool',character); toolPart=node('Part',tool); toolPart.Color='tool color'
 Players={LocalPlayer=LocalPlayer}
+function Players:GetUserIdFromNameAsync(name) assert(name=='AccountUser','not found'); return 456 end
+function Players:GetHumanoidDescriptionFromUserIdAsync(id) assert(id==456); return node('HumanoidDescription') end
+function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
+ local model=node('Model'); local h=node('Humanoid',model); h.RigType=kind
+ local head=node('Part',model); head.Name='Head'; head.Color='loaded skin'
+ local torso=node('Part',model); torso.Name='Torso'; torso.Color='loaded skin'
+ local shirt=node('Shirt',model); shirt.ShirtTemplate='loaded shirt'
+ return model
+end
+UserService={GetUserInfosByUserIdsAsync=function(_,ids)
+ assert(ids[1]==456,'not found'); return {{Username='AccountUser',DisplayName='Account Display'}}
+end}
 RunService={RenderStepped=signal()}
 game={GetService=function(_,name)
- if name=='RunService' then return RunService elseif name=='Players' then return Players elseif name=='CoreGui' then return coreGui elseif name=='Workspace' then return workspace end
+ if name=='UserService' then return UserService elseif name=='RunService' then return RunService elseif name=='Players' then return Players elseif name=='CoreGui' then return coreGui elseif name=='Workspace' then return workspace end
 end}
 facilityGui=node('ScreenGui',coreGui)
 Library={GuiRoots={[facilityGui]=true},Addons={},Connections={},RepaintHooks={},Painted={}}
@@ -151,7 +173,7 @@ assert(panel.EditorControls.Preview.Value:find('test name',1,true))
 panel.EditorControls.Badge:Set('custom'); assert(panel.EditorControls.BadgeText.Instance.Visible)
 panel.EditorControls.BadgeText:Set('tester')
 assert(panel.EditorControls.Preview.Value:find('test name tester',1,true))
-assert(panel.EditorControls.Load.Options.Disabled)
+assert(not panel.EditorControls.Load.Options.Disabled)
 assert(p:GetName()=='RealUser')
 panel.MethodControl:Set('anonymous'); assert(not panel.EditCustom.Visible)
 panel.Controls.Enabled:Set(true)
@@ -345,6 +367,29 @@ p:Restore(); assert(p:GetName()=='RealUser' and avatar.Image==bust)
 p:SetOptions({Enabled=true}); assert(p:GetName()=='A&B')
 p:SetMethod('anonymous'); assert(p:GetName()=='seized.cc/1' and p:GetUserId()==0)
 assert(panel.MethodControl:Get()=='anonymous' and not panel.EditCustom.Visible)
+-- Account loading is draft-only, and failures leave the active identity intact.
+local identity=p:LoadAccount('@AccountUser')
+assert(identity.Name=='AccountUser' and identity.UserId==456 and p:GetName()=='seized.cc/1')
+assert(not pcall(function() p:LoadAccount('missing') end))
+assert(p:GetName()=='seized.cc/1')
+panel.EditorControls.Account:Set('456')
+panel.EditorControls.Load.Options.Callback()
+assert(panel.EditorControls.Username:Get()=='AccountUser')
+assert(panel.EditorControls.Appearance:Get()=='loaded account')
+panel.EditorControls.Username:Set('Override')
+panel.EditorControls.Actions[2].Callback()
+assert(panel.EditorControls.Status.Value=='identity applied' and p:GetName()=='Override')
+assert(p:GetDisplayName()=='Account Display' and p:GetUserId()==456)
+assert(avatar.Image:find('id=456',1,true) and p:GetAvatar():find('id=456',1,true))
+local loadedVisual=LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance')
+assert(loadedVisual and not ownFace(newBody))
+assert(loadedVisual:FindFirstChild('Head').Color=='loaded skin')
+p:SetCustom({UserId=999}) -- numeric text override does not change the selected account appearance
+assert(p:GetUserId()==999 and p:GetAvatar():find('id=456',1,true))
+p:Restore(); assert(loadedVisual.Parent==nil and avatar.Image==bust)
+p:SetOptions({Enabled=true}); assert(LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance'))
+p:SetCustom({Appearance='keep mine'}); assert(not LocalPlayer.Character:FindFirstChild('FacilityCustomAppearance'))
+p:SetMethod('anonymous'); assert(ownFace(newBody))
 -- Existing/open, newly created, late-owned and explicitly registered previews.
 local viewport=node('ViewportFrame',playerGui)
 local camera=node('Camera',viewport); viewport.CurrentCamera=camera
@@ -365,6 +410,11 @@ p:SetOptions({Enabled=true})
 assert(copyHair.Transparency==1 and copyHair.LocalTransparencyModifier==0)
 assert(copyHead.Transparency==1 and copyTorso.Color=='255,255,255' and ownFace(copyHead))
 assert(copyShirt.ShirtTemplate=='' and viewport.CurrentCamera==camera)
+p:SetCustom({AccountId=456,Appearance='loaded account'}); p:SetMethod('custom')
+assert(copy:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==1 and copyHair.Transparency==1)
+RunService.RenderStepped:Fire()
+p:SetMethod('anonymous'); assert(not copy:FindFirstChild('FacilityCustomAppearance') and copyTorso.Transparency==0)
+
 local lateAccessory=node('Accessory',copy); local lateHair=node('Part',lateAccessory)
 assert(lateHair.Transparency==1)
 copyShirt.ShirtTemplate='new outfit'; assert(copyShirt.ShirtTemplate=='')

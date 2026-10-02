@@ -19,6 +19,45 @@ return function(Library)
 
     local custom = { Name = "seized", DisplayName = "seized", UserId = 0, Appearance = "anonymous" }
     local editorRoots = {}
+    local accounts = {}
+    local loadingAccount = false
+
+    -- Loading returns draft data; it does not activate privacy or replace the current identity.
+    function manager:LoadAccount(account)
+        assert(self.Alive, "PrivacyManager is destroyed")
+        assert(not loadingAccount, "an account is already loading")
+        local query = tostring(account):match("^%s*(.-)%s*$")
+        assert(query ~= "", "enter a username or user id")
+        loadingAccount = true
+        local temporary = {}
+        local ok, result = pcall(function()
+            local id = query:match("^%d+$") and tonumber(query)
+                or Players:GetUserIdFromNameAsync(query:gsub("^@", ""))
+            assert(id and id > 0 and id <= 9007199254740991 and id == math.floor(id), "invalid user id")
+            local info = game:GetService("UserService"):GetUserInfosByUserIdsAsync({ id })[1]
+            assert(info and info.Username and info.DisplayName, "account details unavailable")
+            if not accounts[id] then
+                local description = Players:GetHumanoidDescriptionFromUserIdAsync(id)
+                table.insert(temporary, description)
+                local rigs = {}
+                for _, kind in ipairs({ Enum.HumanoidRigType.R6, Enum.HumanoidRigType.R15 }) do
+                    local rig = Players:CreateHumanoidModelFromDescriptionAsync(description, kind)
+                    table.insert(temporary, rig)
+                    rigs[kind] = rig
+                end
+                assert(self.Alive, "PrivacyManager was destroyed while loading")
+                accounts[id] = rigs
+                temporary = { description }
+            end
+            assert(self.Alive, "PrivacyManager was destroyed while loading")
+            return { Name = info.Username, DisplayName = info.DisplayName, UserId = id,
+                AccountId = id, Appearance = "loaded account" }
+        end)
+        for _, item in ipairs(temporary) do item:Destroy() end
+        loadingAccount = false
+        if not ok then error(result, 2) end
+        return result
+    end
     local function replacementIdentity()
         if manager.Options.Method == "custom" then return custom end
         return { Name = anonymousName, DisplayName = anonymousName, UserId = 0, Appearance = "anonymous" }
@@ -27,24 +66,27 @@ return function(Library)
         return manager.Options.HideAvatar and replacementIdentity().Appearance ~= "keep mine"
     end
     function manager:GetCustom()
-        return { Name = custom.Name, DisplayName = custom.DisplayName, UserId = custom.UserId, Appearance = custom.Appearance }
+        return { Name = custom.Name, DisplayName = custom.DisplayName, UserId = custom.UserId, Appearance = custom.Appearance, AccountId = custom.AccountId }
     end
     function manager:SetCustom(values)
         assert(self.Alive and type(values) == "table", "custom identity must be a table")
         local nextIdentity = self:GetCustom()
         for key, value in pairs(values) do
-            assert(nextIdentity[key] ~= nil, "unknown custom identity field: " .. tostring(key))
+            assert(key == "AccountId" or nextIdentity[key] ~= nil, "unknown custom identity field: " .. tostring(key))
             if key == "Name" or key == "DisplayName" then
                 assert(type(value) == "string" and #value <= 64 and value:find("%S")
                     and not value:find("[%c<>]"), key .. " must be plain text, 1–64 bytes")
             elseif key == "UserId" then
                 assert(type(value) == "number" and value >= 0 and value <= 9007199254740991
                     and value == math.floor(value), "user id must be a non-negative whole number")
+            elseif key == "AccountId" then
+                assert(type(value) == "number" and accounts[value], "load this account before selecting its appearance")
             elseif key == "Appearance" then
-                assert(value == "anonymous" or value == "keep mine", "appearance must be anonymous or keep mine")
+                assert(value == "anonymous" or value == "keep mine" or value == "loaded account", "invalid appearance")
             end
             nextIdentity[key] = value
         end
+        assert(nextIdentity.Appearance ~= "loaded account" or accounts[nextIdentity.AccountId], "load an account first")
         custom = nextIdentity
         self:Refresh()
     end
@@ -165,6 +207,9 @@ return function(Library)
         local kind = (params.type or ""):lower()
         if tonumber(params.id) == LocalPlayer.UserId
             and (kind == "avatarheadshot" or kind == "avatarbust" or kind == "avatar") then
+            if self.Options.Method == "custom" and custom.Appearance == "loaded account" then
+                return value:gsub("([&?/]id=)%d+", function(prefix) return prefix .. ("%.0f"):format(custom.AccountId) end)
+            end
             return anonymousAvatar
         end
         return value
@@ -173,6 +218,9 @@ return function(Library)
     function manager:GetAvatar(player)
         player = player or LocalPlayer
         if self.Alive and self.Options.Enabled and hideAppearance() and player == LocalPlayer then
+            if self.Options.Method == "custom" and custom.Appearance == "loaded account" then
+                return "rbxthumb://type=AvatarHeadShot&id=" .. custom.AccountId .. "&w=150&h=150"
+            end
             return anonymousAvatar
         end
         return "rbxthumb://type=AvatarHeadShot&id=" .. player.UserId .. "&w=150&h=150"
@@ -366,8 +414,20 @@ return function(Library)
         local characterVisuals = {}
         local neutralColor = anonymousColor
         local ownedHeads = {}
+        local accountVisual, accountKey, accountParts
+        local function clearAccountVisual()
+            if accountVisual then
+                ownedVisuals[accountVisual] = nil
+                accountVisual:Destroy()
+            end
+            accountVisual, accountKey, accountParts = nil, nil, nil
+        end
+        local function loadedAppearance()
+            return manager.Options.Method == "custom" and custom.Appearance == "loaded account"
+        end
 
         local function clearFaces()
+            clearAccountVisual()
             for head, visual in pairs(ownedHeads) do
                 ownedHeads[head] = nil
                 visual:Destroy()
@@ -380,6 +440,15 @@ return function(Library)
         end
 
         local function syncHeads()
+            if accountParts and character then
+                for _, record in ipairs(accountParts) do
+                    local target = character:FindFirstChild(record.name)
+                    if target and target:IsA("BasePart") then
+                        record.part.CFrame = target.CFrame * record.offset
+                        record.part.LocalTransparencyModifier = isPreview and 0 or target.LocalTransparencyModifier
+                    end
+                end
+            end
             for head, visual in pairs(ownedHeads) do
                 if head.Parent == character then
                     visual.CFrame = head.CFrame
@@ -395,6 +464,43 @@ return function(Library)
 
         local function refreshFaces()
             if not characterEnabled() or not character then clearFaces(); return end
+            if loadedAppearance() then
+                for head, visual in pairs(ownedHeads) do
+                    ownedHeads[head] = nil; ownedVisuals[visual] = nil; visual:Destroy()
+                end
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                local kind = humanoid and humanoid.RigType or Enum.HumanoidRigType.R6
+                local template = accounts[custom.AccountId] and accounts[custom.AccountId][kind]
+                local key = tostring(custom.AccountId) .. tostring(kind)
+                if accountKey ~= key then clearAccountVisual() end
+                if template and not accountVisual then
+                    accountVisual = template:Clone()
+                    accountVisual.Name = "FacilityCustomAppearance"
+                    ownedVisuals[accountVisual] = true
+                    accountKey, accountParts = key, {}
+                    for _, node in ipairs(accountVisual:GetDescendants()) do
+                        if node:IsA("BasePart") then
+                            local anchor = node
+                            if node.Parent:IsA("Accessory") then
+                                local weld = node:FindFirstChild("AccessoryWeld")
+                                anchor = weld and weld.Part1
+                            end
+                            if anchor and anchor:IsA("BasePart") then
+                                table.insert(accountParts, { part = node, name = anchor.Name,
+                                    offset = anchor.CFrame:ToObjectSpace(node.CFrame) })
+                            end
+                            node.Anchored = true
+                            node.CanCollide, node.CanTouch, node.CanQuery = false, false, false
+                            if node.Name == "HumanoidRootPart" then node.Transparency = 1 end
+                        elseif node:IsA("Script") or node:IsA("LocalScript") then node:Destroy()
+                        elseif node:IsA("Humanoid") then node.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end
+                    end
+                    accountVisual.Parent = character
+                end
+                syncHeads()
+                return
+            end
+            clearAccountVisual()
             for head, visual in pairs(ownedHeads) do
                 if head.Parent ~= character or visual.Parent ~= character then
                     ownedHeads[head] = nil
@@ -416,7 +522,9 @@ return function(Library)
         local function applyVisual(node, property, record)
             if record.writing then return end
             local value = record.original
-            if characterEnabled() then value = record.masked end
+            if characterEnabled() then
+                value = type(record.masked) == "function" and record.masked() or record.masked
+            end
             record.rendered = value
             if node[property] ~= value then
                 record.writing = true
@@ -489,6 +597,11 @@ return function(Library)
             elseif body then
                 if node == body then
                     maskProperty(node, "Color", neutralColor)
+                    if node.Name ~= "Head" then
+                        maskProperty(node, "Transparency", function()
+                            return loadedAppearance() and 1 or characterVisuals[node].properties.Transparency.original
+                        end)
+                    end
                     if node:IsA("MeshPart") then maskProperty(node, "TextureID", "") end
                     if node.Name == "Head" then
                         maskProperty(node, "Transparency", 1)
@@ -705,18 +818,35 @@ return function(Library)
         })
         panel.CustomEditor = editor
         editorRoots[editor.Root] = true
-        panel.Draft = { Username = custom.Name, DisplayName = custom.DisplayName, UserId = ("%.0f"):format(custom.UserId), Appearance = custom.Appearance, Badge = "default", BadgeText = "" }
+        panel.Draft = { Username = custom.Name, DisplayName = custom.DisplayName, UserId = ("%.0f"):format(custom.UserId), Appearance = custom.Appearance, AccountId = custom.AccountId, Badge = "default", BadgeText = "" }
         local draft, fields = panel.Draft, {}
         panel.EditorControls = fields
         local content = editor.Content
         content:Label("edit your identity, then apply. user identity must be enabled to display it.")
         content:Label("account")
         fields.Account = content:Input({ Text = "username or user id", Flag = false, Placeholder = "enter an account" })
-        fields.Load = content:Button({ Text = "load account", Disabled = true })
-        content:Label("account loading is coming next")
+        fields.LoadStatus = content:Label("")
+        local updatePreview = function() end
+        local loading = false
+        fields.Load = content:Button({ Text = "load account", Callback = function()
+            if loading or not panel.Alive then return end
+            loading = true
+            fields.LoadStatus:Set("loading account…")
+            local ok, identity = pcall(self.LoadAccount, self, fields.Account:Get())
+            loading = false
+            if not panel.Alive then return end
+            if not ok then fields.LoadStatus:Set(tostring(identity)); return end
+            draft.AccountId = identity.AccountId
+            for key, value in pairs({ Username = identity.Name, DisplayName = identity.DisplayName,
+                UserId = ("%.0f"):format(identity.UserId), Appearance = identity.Appearance }) do
+                draft[key] = value
+                fields[key]:Set(value, true)
+            end
+            updatePreview()
+            fields.LoadStatus:Set("account loaded · edit or apply identity")
+        end })
         content:Divider()
         content:Label("identity")
-        local updatePreview = function() end
         for _, field in ipairs({ { "Username", "username" }, { "DisplayName", "display name" }, { "UserId", "user id" } }) do
             local key = field[1]
             fields[key] = content:Input({
@@ -727,7 +857,7 @@ return function(Library)
         content:Divider()
         content:Label("appearance")
         fields.Appearance = content:Dropdown({
-            Text = "avatar & character", Flag = false, Options = { "keep mine", "anonymous" }, Default = draft.Appearance,
+            Text = "avatar & character", Flag = false, Options = { "loaded account", "keep mine", "anonymous" }, Default = draft.Appearance,
             Callback = function(value) draft.Appearance = value; updatePreview() end,
         })
         content:Label("badges · preview only for now")
@@ -765,7 +895,7 @@ return function(Library)
                     local idText = fields.UserId:Get():match("^%s*(.-)%s*$")
                     assert(idText:match("^%d+$"), "user id must contain digits only")
                     self:SetCustom({ Name = fields.Username:Get(), DisplayName = fields.DisplayName:Get(),
-                        UserId = tonumber(idText), Appearance = fields.Appearance:Get() })
+                        UserId = tonumber(idText), Appearance = fields.Appearance:Get(), AccountId = draft.AccountId })
                     self:SetMethod("custom")
                 end)
                 fields.Status:Set(ok and "identity applied" or tostring(err))
@@ -857,6 +987,10 @@ return function(Library)
         end
         for _, connection in ipairs(connections) do connection:Disconnect() end
         for panel in pairs(panels) do panel:Destroy() end
+        for id, rigs in pairs(accounts) do
+            for _, rig in pairs(rigs) do rig:Destroy() end
+            accounts[id] = nil
+        end
         if Library.PrivacyManager == self then Library.PrivacyManager = nil end
         if Library.Addons.PrivacyManager == self then Library.Addons.PrivacyManager = nil end
     end

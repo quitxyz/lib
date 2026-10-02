@@ -139,7 +139,7 @@ local identity = PrivacyManager:GetAnonymousIdentity()
 
 The returned identity is a fresh table, including a fresh Appearance table. Changing it does not modify the manager. Prefix accepts plain text up to 64 bytes (no control characters or angle brackets), and updates existing masked text immediately. The local identity reserves number 1; masking/numbering other players is a later step. This is a display label, so punctuation such as `seized.cc/` does not need to be a valid Roblox username.
 
-For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Manual custom identities are supported below. Account loading, badge application and randomised identities are not implemented yet.
+For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Manual custom identities are supported below. Badge application and randomised identities are not implemented yet.
 
 The face uses image texture 144080495, verified from Roblox's Smile face asset (144075659). The catalog face asset contains a Decal; its texture ID is the image used for both GUI images and character decals. The addon applies the face to its own classic head with Transparency 0. This avoids depending on the bundled `rbxasset://textures/face.png` path. The texture still requires Roblox asset loading; no automated mock test can verify its rendering on a particular device.
 
@@ -173,7 +173,7 @@ Select **custom**, open **edit custom identity**, enter a username, display name
 
 Appearance supports **anonymous** (the white classic appearance) and **keep mine** (restore the real thumbnails and character appearance while retaining text privacy). Switching back to anonymous restores the anonymous identity. Disabling privacy restores the original visuals.
 
-Draft edits only apply after pressing the button. Closing and reopening keeps the draft during the panel lifetime; this editor does not persist it to disk. Account loading remains disabled. Badge choices are preview-only and do not apply badges to game or Facility visuals yet.
+Draft edits only apply after pressing the button. Closing and reopening keeps the draft during the panel lifetime; this editor does not persist it to disk. Account loading is available as described below. Badge choices are preview-only and do not apply badges to game or Facility visuals yet.
 
 The manual API accepts partial updates:
 
@@ -197,3 +197,23 @@ Generic text containing identical real username/display-name tokens uses the use
 BuildPrivacySection accepts EditorWidth (default 420) and EditorHeight (default 0.86). Its panel exposes CustomEditor, EditorControls and Draft. The editor itself is excluded from privacy replacement so its labels and draft preview remain readable. Destroying the panel destroys its editor.
 
 The gear retains hide and scope toggles. Capped gear popups and dropdowns open downward and shrink to available screen height, with scrolling for overflow.
+
+## Load a custom Roblox account
+
+Enter a username (optionally beginning with @) or numeric user ID, then press **load account**. The editor fills in the account username, display name and ID, and selects **loaded account** appearance. Loading only updates the draft. Edit any fields and press **apply identity** to activate the selected custom identity.
+
+The selected appearance stays linked to the loaded account even if you override the displayed user ID. Anonymous and keep mine remain available. Lookup or asset-loading failures appear in the editor and retain the current applied identity.
+
+API usage:
+
+```lua
+local identity = PrivacyManager:LoadAccount("seized_cc") -- yields; may error
+PrivacyManager:SetCustom(identity)
+PrivacyManager:SetMethod("custom")
+```
+
+LoadAccount returns Name, DisplayName, UserId, AccountId and Appearance. AccountId selects the loaded appearance independently of the displayed UserId. R6 and R15 appearance templates are loaded once per chosen account and released when the manager is destroyed.
+
+Recognised thumbnails preserve their original thumbnail type and resolution while switching the account ID. Live characters and recognised/registered game preview rigs receive a separate local visual model. Its body parts follow the original rig and accessories follow their attachment body parts. Original character references, joints and physics remain intact; disabling masking removes the visual model and restores the tracked properties.
+
+Matching R6/R15 body parts are required. Custom rigs, unusual accessory attachments and differences in body proportions can require a game adapter. Native avatar inspection that independently fetches account data remains subject to the existing accessible/identifiable preview coverage.
