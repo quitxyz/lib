@@ -6,7 +6,7 @@ return function(Library)
     local LocalPlayer = Players.LocalPlayer
     assert(LocalPlayer, "PrivacyManager requires a local player")
     local manager = { Alive = true, Options = {
-        Enabled = false, HideUsername = true, HideDisplayName = true,
+        Enabled = false, HideUsername = true, HideDisplayName = true, HideAvatar = true,
         AffectFacility = true, AffectGame = false,
     } }
     Library.PrivacyManager = manager
@@ -77,6 +77,33 @@ return function(Library)
         return table.concat(out)
     end
 
+    local anonymousAvatar = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+
+    function manager:ResolveImage(value, scope)
+        if type(value) ~= "string" or not self.Alive or not self.Options.Enabled or not self.Options.HideAvatar then return value end
+        if scope == "game" then
+            if not self.Options.AffectGame then return value end
+        elseif not self.Options.AffectFacility then return value end
+        local query = value:match("^rbxthumb://(.+)$")
+        if not query then return value end
+        local params = {}
+        for key, item in query:gmatch("([^&=?]+)=([^&]+)") do params[key:lower()] = item end
+        local kind = (params.type or ""):lower()
+        if tonumber(params.id) == LocalPlayer.UserId
+            and (kind == "avatarheadshot" or kind == "avatarbust" or kind == "avatar") then
+            return anonymousAvatar
+        end
+        return value
+    end
+
+    function manager:GetAvatar(player)
+        player = player or LocalPlayer
+        if self.Alive and self.Options.Enabled and self.Options.HideAvatar and player == LocalPlayer then
+            return anonymousAvatar
+        end
+        return "rbxthumb://type=AvatarHeadShot&id=" .. player.UserId .. "&w=150&h=150"
+    end
+
     local function scopeOf(node)
         local current = node
         local gameScope = false
@@ -91,11 +118,18 @@ return function(Library)
     local function apply(node, record)
         if record.writing then return end
         local scope = scopeOf(node)
-        local value = scope and manager:ResolveText(record.original, scope, node.RichText) or record.original
+        local value = record.original
+        if scope then
+            if record.property == "Image" then
+                value = manager:ResolveImage(value, scope)
+            else
+                value = manager:ResolveText(value, scope, node.RichText)
+            end
+        end
         record.rendered = value
-        if node.Text ~= value then
+        if node[record.property] ~= value then
             record.writing = true
-            node.Text = value
+            node[record.property] = value
             record.writing = false
         end
     end
@@ -105,20 +139,25 @@ return function(Library)
         if not record then return end
         watched[node] = nil
         for _, connection in ipairs(record.connections) do connection:Disconnect() end
-        if restore then pcall(function() node.Text = record.original end) end
+        if restore then pcall(function() node[record.property] = record.original end) end
     end
 
     local function watch(node)
         if not manager.Alive or watched[node] then return end
-        if not node:IsA("TextLabel") and not node:IsA("TextButton") then return end
-        local record = { original = node.Text, rendered = node.Text, connections = {} }
+        local property
+        if node:IsA("TextLabel") or node:IsA("TextButton") then property = "Text"
+        elseif node:IsA("ImageLabel") or node:IsA("ImageButton") then property = "Image"
+        else return end
+        local record = { property = property, original = node[property], rendered = node[property], connections = {} }
         watched[node] = record
-        table.insert(record.connections, node:GetPropertyChangedSignal("Text"):Connect(function()
-            if record.writing or node.Text == record.rendered then return end
-            record.original = node.Text
+        table.insert(record.connections, node:GetPropertyChangedSignal(property):Connect(function()
+            if record.writing or node[property] == record.rendered then return end
+            record.original = node[property]
             apply(node, record)
         end))
-        table.insert(record.connections, node:GetPropertyChangedSignal("RichText"):Connect(function() apply(node, record) end))
+        if property == "Text" then
+            table.insert(record.connections, node:GetPropertyChangedSignal("RichText"):Connect(function() apply(node, record) end))
+        end
         table.insert(record.connections, node.AncestryChanged:Connect(function() apply(node, record) end))
         table.insert(record.connections, node.Destroying:Connect(function() forget(node, false) end))
         apply(node, record)
@@ -194,6 +233,7 @@ return function(Library)
         toggle(section, "Enabled", "user identity"):Gear(function(content)
             toggle(content, "HideUsername", "hide username")
             toggle(content, "HideDisplayName", "hide display name")
+            toggle(content, "HideAvatar", "hide avatar")
             content:Divider()
             toggle(content, "AffectFacility", "affect facility")
             toggle(content, "AffectGame", "affect game ui")

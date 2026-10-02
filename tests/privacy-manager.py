@@ -17,7 +17,7 @@ function signal()
 end
 nodes={}
 function node(class,parent,text)
- local props={ClassName=class,Text=text or '',RichText=false}
+ local props={ClassName=class,Text=text or '',Image='',RichText=false}
  local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal()}
  local changed={}
  local methods={}
@@ -139,11 +139,38 @@ Library.GuiRoots[futureGui]=true
 p:WatchRoot(futureGui,'facility')
 local notification=label(futureGui,'hello RealUser')
 assert(notification.Text=='hello player 001')
+-- Avatar masking follows the same roots and restores the latest source image.
+local head='rbxthumb://type=AvatarHeadShot&id=123&w=150&h=150'
+local bust='rbxthumb://id=123&type=AvatarBust&w=420&h=420'
+local avatar=node('ImageLabel',facilityGui); avatar.Image=head
+local placeholder=p:GetAvatar()
+assert(placeholder~=head and avatar.Image==placeholder)
+assert(panel.Controls.HideAvatar.Value==true)
+local gameAvatar=node('ImageButton',playerGui); gameAvatar.Image=bust
+assert(gameAvatar.Image==placeholder)
+local otherAvatar=node('ImageLabel',playerGui)
+otherAvatar.Image='rbxthumb://type=AvatarHeadShot&id=456&w=150&h=150'
+assert(otherAvatar.Image:find('id=456',1,true))
+assert(p:ResolveImage('rbxthumb://type=GameIcon&id=123&w=150&h=150')=='rbxthumb://type=GameIcon&id=123&w=150&h=150')
+assert(p:ResolveImage('rbxassetid://123')=='rbxassetid://123')
+p:SetOptions({AffectGame=false}); assert(gameAvatar.Image==bust and avatar.Image==placeholder)
+p:SetOptions({AffectGame=true,AffectFacility=false}); assert(gameAvatar.Image==placeholder and avatar.Image==head)
+p:SetOptions({AffectFacility=true})
+avatar.Image=bust; assert(avatar.Image==placeholder)
+panel.Controls.HideAvatar:Set(false)
+assert(avatar.Image==bust and gameAvatar.Image==bust)
+panel.Controls.HideAvatar:Set(true)
+assert(avatar.Image==placeholder)
+avatar.Parent=nil; assert(avatar.Image==bust)
+avatar.Parent=facilityGui; assert(avatar.Image==placeholder)
+p:Restore(); assert(avatar.Image==bust)
+p:SetOptions({Enabled=true})
 local doomed=label(playerGui,'RealUser'); doomed:Destroy()
 p:Destroy()
 assert(gameLabel.Text=='Real Display has joined' and newLabel.Text=='Real Display is ready')
 assert(facilityLabel.Text=='teleport to RealUser')
 assert(not p.Alive and Library.PrivacyManager==nil)
+assert(avatar.Image==bust and gameAvatar.Image==bust)
 gameLabel.Text='RealUser again'; assert(gameLabel.Text=='RealUser again')
 assert(not pcall(function() factory(Library):SetOptions({NotAnOption=true}) end))
 Library.PrivacyManager:Destroy()

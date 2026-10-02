@@ -1,6 +1,6 @@
 # PrivacyManager
 
-This first version masks the local player's username and display name in presentation text. It does not change Player.Name, Player.DisplayName, Player.UserId, character references, dropdown selection values, or gameplay targets.
+This version masks the local player's username, display name, and recognizable avatar thumbnails. It does not change Player.Name, Player.DisplayName, Player.UserId, character references, dropdown selection values, or gameplay targets.
 
 ## Setup
 
@@ -16,10 +16,11 @@ local privacy = PrivacyManager:BuildPrivacySection(settingsTab, 1)
 The section contains **user identity**, with a gear for:
 - hide username
 - hide display name
+- hide avatar
 - affect facility
 - affect game ui
 
-Defaults: identity masking off, both name fields selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing any gear option refreshes affected text automatically.
+Defaults: identity masking off, both name fields and avatar masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing any gear option refreshes affected text automatically.
 
 Alternatively:
 
@@ -36,6 +37,7 @@ PrivacyManager:SetOptions({
     Enabled = true,
     HideUsername = true,
     HideDisplayName = true,
+    HideAvatar = true,
     AffectFacility = true,
     AffectGame = false,
 })
@@ -43,6 +45,7 @@ PrivacyManager:SetOptions({
 local identity = PrivacyManager:GetIdentity() -- local player by default
 local shownName = PrivacyManager:GetName(player)
 local shownDisplayName = PrivacyManager:GetDisplayName(player)
+local shownAvatar = PrivacyManager:GetAvatar(player)
 local text = PrivacyManager:ResolveText("teleport to RealName", "facility", false)
 
 PrivacyManager:Refresh()
@@ -79,10 +82,19 @@ PrivacyManager:BuildPrivacySection(settingsTab, 1, {
         Enabled = "hide my identity",
         HideUsername = "hide username",
         HideDisplayName = "hide display name",
+        HideAvatar = "hide avatar",
         AffectFacility = "affect facility",
         AffectGame = "affect game ui",
     },
 })
 ```
 
-BuildPrivacyTab also accepts Title and Icon. Avatar/ID masking, other players, server information, custom/random identities, adapters, and character appearance are later steps.
+BuildPrivacyTab also accepts Title and Icon. ID masking, other players, server information, custom/random identities, adapters, and character appearance are later steps.
+
+## Avatar thumbnails
+
+`hide avatar` replaces local-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar with Roblox's neutral GUI image placeholder. The watcher handles ImageLabel and ImageButton instances, existing and newly created, using the same Facility/game switches as text. It preserves the latest original Image and restores it when disabled or unloaded. Other players, game icons, and unrelated images are unchanged. Character appearance and ViewportFrame models are not modified.
+
+`GetAvatar(player)` returns an avatar headshot URI, or the placeholder for the local player when Enabled and HideAvatar are true. Like the name getters, it does not apply scope switches. `ResolveImage(image, scope)` applies those switches and is used automatically by the watcher.
+
+Opaque asset/CDN URLs (including resolved thumbnail URLs without a player ID), and custom avatar renderers cannot be reliably identified by this first image resolver and are left unchanged. The automatic coverage currently recognizes rbxthumb URIs only.
