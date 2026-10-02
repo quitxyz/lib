@@ -174,7 +174,7 @@ local head='rbxthumb://type=AvatarHeadShot&id=123&w=150&h=150'
 local bust='rbxthumb://id=123&type=AvatarBust&w=420&h=420'
 local avatar=node('ImageLabel',facilityGui); avatar.Image=head
 local placeholder=p:GetAvatar()
-assert(placeholder=='rbxasset://textures/face.png' and avatar.Image==placeholder)
+assert(placeholder=='rbxassetid://144080495' and avatar.Image==placeholder)
 assert(avatar.BackgroundColor3=='255,255,255' and avatar.BackgroundTransparency==0)
 assert(avatar.ImageRectSize==Vector2.zero)
 avatar.BackgroundColor3='updated background'; assert(avatar.BackgroundColor3=='255,255,255')
@@ -203,8 +203,8 @@ p:SetOptions({Enabled=true})
 local function ownFace(head)
  for _,child in ipairs(head:GetChildren()) do if child.Name=='FacilityAnonymousFace' then return child end end
 end
-assert(ownFace(body) and ownFace(body).Texture=='rbxasset://textures/face.png')
-assert(ownFace(body).Transparency==0)
+assert(ownFace(body) and ownFace(body).Texture=='rbxassetid://144080495')
+assert(ownFace(body).Transparency==0 and ownFace(body).ZIndex==2)
 assert(body.Color=='255,255,255' and body.TextureID=='')
 assert(face.Transparency==1 and shirt.ShirtTemplate=='')
 assert(handle.LocalTransparencyModifier==1 and sparkles.Enabled==false)
@@ -236,7 +236,7 @@ p:SetAnonymous({Prefix='player '})
 assert(p:GetName()=='player 1' and p:GetAnonymousIdentity().Name=='player 1')
 assert(facilityLabel.Text=='teleport to player 1')
 local identity=p:GetAnonymousIdentity(); identity.Name='changed'; identity.Appearance.Face='changed'
-assert(p:GetAnonymousIdentity().Appearance.Face=='rbxasset://textures/face.png')
+assert(p:GetAnonymousIdentity().Appearance.Face=='rbxassetid://144080495')
 assert(not pcall(function() p:SetAnonymous({Prefix='<b>oops</b>'}) end))
 p:SetAnonymous({Prefix='seized.cc/'})
 local doomed=label(playerGui,'RealUser'); doomed:Destroy()

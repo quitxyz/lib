@@ -97,7 +97,7 @@ BuildPrivacyTab also accepts Title and Icon. Other players, server information, 
 
 ## Avatar thumbnails
 
-`hide avatar` replaces local-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar with the classic face image on a white background. The watcher handles ImageLabel and ImageButton instances, existing and newly created, using the same Facility/game switches as text. It preserves the latest original Image and restores it when disabled or unloaded. Other players, game icons, and unrelated images are unchanged. ViewportFrame models are not modified. Local character appearance is covered below.
+`hide avatar` replaces local-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar with the classic Smile image texture (`rbxassetid://144080495`) on a white background. The watcher handles ImageLabel and ImageButton instances, existing and newly created, using the same Facility/game switches as text. It preserves the latest original Image and restores it when disabled or unloaded. Other players, game icons, and unrelated images are unchanged. ViewportFrame models are not modified. Local character appearance is covered below.
 
 `GetAvatar(player)` returns an avatar headshot URI, or the classic face texture for the local player when Enabled and HideAvatar are true. Like the name getters, it does not apply scope switches. `ResolveImage(image, scope)` applies those switches and is used automatically by the watcher.
 
@@ -140,3 +140,5 @@ local identity = PrivacyManager:GetAnonymousIdentity()
 The returned identity is a fresh table, including a fresh Appearance table. Changing it does not modify the manager. Prefix accepts plain text up to 64 bytes (no control characters or angle brackets), and updates existing masked text immediately. The local identity reserves number 1; masking/numbering other players is a later step. This is a display label, so punctuation such as `seized.cc/` does not need to be a valid Roblox username.
 
 For manually built images using GetAvatar, set a white background while the returned image is the classic face texture. The automatic watcher handles styling when it recognizes a real avatar thumbnail URI. Custom, randomised, and badge controls are not exposed yet.
+
+The face uses image texture 144080495, verified from Roblox's Smile face asset (144075659). The catalog face asset contains a Decal; its texture ID is the image used for both GUI images and character decals. The addon sets its owned decal's Transparency to 0 and ZIndex to 2. This avoids depending on the bundled `rbxasset://textures/face.png` path. The texture still requires Roblox asset loading; no automated mock test can verify its rendering on a particular device.

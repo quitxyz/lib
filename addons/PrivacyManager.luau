@@ -13,7 +13,7 @@ return function(Library)
     local watched, roots, connections, panels = {}, {}, {}, {}
     local anonymousPrefix = "seized.cc/"
     local anonymousName = anonymousPrefix .. "1"
-    local anonymousAvatar = "rbxasset://textures/face.png"
+    local anonymousAvatar = "rbxassetid://144080495"
     local anonymousColor = Color3.fromRGB(255, 255, 255)
 
     function manager:GetAnonymousIdentity()
@@ -276,6 +276,9 @@ return function(Library)
                 face.Name = "FacilityAnonymousFace"
                 face.Face = Enum.NormalId.Front
                 face.Texture = anonymousAvatar
+                face.Transparency = 0
+                face.Color3 = Color3.fromRGB(255, 255, 255)
+                face.ZIndex = 2
                 ownedFaces[head], ownedVisuals[face] = face, true
                 face.Parent = head
             end
