@@ -11,7 +11,30 @@ return function(Library)
     } }
     Library.PrivacyManager = manager
     local watched, roots, connections, panels = {}, {}, {}, {}
-    local anonymousName = "player 001"
+    local anonymousPrefix = "seized.cc/"
+    local anonymousName = anonymousPrefix .. "1"
+    local anonymousAvatar = "rbxasset://textures/face.png"
+    local anonymousColor = Color3.fromRGB(255, 255, 255)
+
+    function manager:GetAnonymousIdentity()
+        return {
+            Name = anonymousName, DisplayName = anonymousName, UserId = 0,
+            Avatar = anonymousAvatar,
+            Appearance = { BodyColor = anonymousColor, Face = anonymousAvatar },
+        }
+    end
+
+    function manager:SetAnonymous(options)
+        assert(type(options) == "table", "anonymous options must be a table")
+        for key in pairs(options) do assert(key == "Prefix", "unknown anonymous option: " .. tostring(key)) end
+        if options.Prefix ~= nil then
+            assert(type(options.Prefix) == "string" and #options.Prefix <= 64
+                and not options.Prefix:find("[%c<>]"), "anonymous Prefix must be plain text up to 64 bytes")
+            anonymousPrefix = options.Prefix
+            anonymousName = anonymousPrefix .. "1"
+        end
+        self:Refresh()
+    end
 
     local function wordByte(value)
         return value ~= "" and (value:match("[%w_]") ~= nil or value:byte() >= 128)
@@ -86,7 +109,6 @@ return function(Library)
         return table.concat(out)
     end
 
-    local anonymousAvatar = "rbxasset://textures/ui/GuiImagePlaceholder.png"
 
     function manager:ResolveImage(value, scope)
         if type(value) ~= "string" or not self.Alive or not self.Options.Enabled or not self.Options.HideAvatar then return value end
@@ -124,6 +146,23 @@ return function(Library)
         return gameScope and "game" or nil
     end
 
+    local imageStyle = {
+        BackgroundColor3 = anonymousColor, BackgroundTransparency = 0,
+        ImageColor3 = anonymousColor, ImageRectOffset = Vector2.zero,
+        ImageRectSize = Vector2.zero,
+    }
+
+    local function applyImageStyle(node, record, enabled)
+        record.styling = true
+        for property, state in pairs(record.styles or {}) do
+            local value = state.original
+            if enabled then value = imageStyle[property] end
+            state.rendered = value
+            node[property] = value
+        end
+        record.styling = false
+    end
+
     local function apply(node, record)
         if record.writing then return end
         local scope = scopeOf(node)
@@ -134,6 +173,9 @@ return function(Library)
             else
                 value = manager:ResolveText(value, scope, node.RichText)
             end
+        end
+        if record.property == "Image" then
+            applyImageStyle(node, record, value ~= record.original and value == anonymousAvatar)
         end
         record.rendered = value
         if node[record.property] ~= value then
@@ -148,7 +190,10 @@ return function(Library)
         if not record then return end
         watched[node] = nil
         for _, connection in ipairs(record.connections) do connection:Disconnect() end
-        if restore then pcall(function() node[record.property] = record.original end) end
+        if restore then
+            pcall(function() node[record.property] = record.original end)
+            if record.styles then pcall(function() applyImageStyle(node, record, false) end) end
+        end
     end
 
     local function watch(node)
@@ -159,6 +204,18 @@ return function(Library)
         else return end
         local record = { property = property, original = node[property], rendered = node[property], connections = {} }
         watched[node] = record
+        if property == "Image" then
+            record.styles = {}
+            for key in pairs(imageStyle) do
+                record.styles[key] = { original = node[key], rendered = node[key] }
+                table.insert(record.connections, node:GetPropertyChangedSignal(key):Connect(function()
+                    local state = record.styles[key]
+                    if record.styling or node[key] == state.rendered then return end
+                    state.original = node[key]
+                    apply(node, record)
+                end))
+            end
+        end
         table.insert(record.connections, node:GetPropertyChangedSignal(property):Connect(function()
             if record.writing or node[property] == record.rendered then return end
             record.original = node[property]
@@ -188,11 +245,41 @@ return function(Library)
     -- Change only visual properties on the existing character; never replace the rig.
     local character, characterConnections = nil, {}
     local characterVisuals = {}
-    local neutralColor = Color3.fromRGB(160, 160, 160)
+    local neutralColor = anonymousColor
+    local ownedFaces, ownedVisuals = {}, {}
+
+    local function clearFaces()
+        for head, face in pairs(ownedFaces) do
+            ownedFaces[head] = nil
+            face:Destroy()
+            ownedVisuals[face] = nil
+        end
+    end
 
     local function characterEnabled()
         return manager.Alive and manager.Options.Enabled
             and manager.Options.AffectGame and manager.Options.HideAvatar
+    end
+
+    local function refreshFaces()
+        if not characterEnabled() or not character then clearFaces(); return end
+        for head, face in pairs(ownedFaces) do
+            if head.Parent ~= character or face.Parent ~= head then
+                ownedFaces[head] = nil
+                face:Destroy()
+                ownedVisuals[face] = nil
+            end
+        end
+        for _, head in ipairs(character:GetChildren()) do
+            if head:IsA("BasePart") and head.Name == "Head" and not ownedFaces[head] then
+                local face = Instance.new("Decal")
+                face.Name = "FacilityAnonymousFace"
+                face.Face = Enum.NormalId.Front
+                face.Texture = anonymousAvatar
+                ownedFaces[head], ownedVisuals[face] = face, true
+                face.Parent = head
+            end
+        end
     end
 
     local function applyVisual(node, property, record)
@@ -243,7 +330,7 @@ return function(Library)
     end
 
     local function watchCharacterVisual(node)
-        if not character or not node:IsDescendantOf(character) then return end
+        if ownedVisuals[node] or not character or not node:IsDescendantOf(character) then return end
         local ancestor, accessory, body = node, false, nil
         while ancestor and ancestor ~= character do
             if ancestor:IsA("Tool") then return end
@@ -261,6 +348,7 @@ return function(Library)
             if node == body then
                 maskProperty(node, "Color", neutralColor)
                 if node:IsA("MeshPart") then maskProperty(node, "TextureID", "") end
+                if node.Name == "Head" then refreshFaces() end
             elseif node:IsA("Decal") or node:IsA("Texture") then
                 maskProperty(node, "Transparency", 1)
             elseif node:IsA("SpecialMesh") then maskProperty(node, "TextureId", "") end
@@ -272,6 +360,7 @@ return function(Library)
     end
 
     local function detachCharacter()
+        clearFaces()
         for _, connection in ipairs(characterConnections) do connection:Disconnect() end
         table.clear(characterConnections)
         for node in pairs(characterVisuals) do forgetVisual(node) end
@@ -314,6 +403,7 @@ return function(Library)
         for node, records in pairs(characterVisuals) do
             for property, record in pairs(records.properties) do applyVisual(node, property, record) end
         end
+        refreshFaces()
         for panel in pairs(panels) do
             for key, control in pairs(panel.Controls) do control:Set(self.Options[key], true) end
         end
