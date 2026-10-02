@@ -3,6 +3,7 @@
 return function(Library)
     if Library.PrivacyManager and Library.PrivacyManager.Alive then return Library.PrivacyManager end
     local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
     local LocalPlayer = Players.LocalPlayer
     assert(LocalPlayer, "PrivacyManager requires a local player")
     local manager = { Alive = true, Options = {
@@ -146,21 +147,88 @@ return function(Library)
         return gameScope and "game" or nil
     end
 
-    local imageStyle = {
-        BackgroundColor3 = anonymousColor, BackgroundTransparency = 0,
-        ImageColor3 = anonymousColor, ImageRectOffset = Vector2.zero,
-        ImageRectSize = Vector2.zero,
-    }
+    local ownedVisuals = {}
+    local function classicPart(parent, name, size, position)
+        local part = Instance.new("Part")
+        part.Name = name
+        part.Size = size
+        part.CFrame = CFrame.new(position)
+        part.Color = anonymousColor
+        part.Material = Enum.Material.SmoothPlastic
+        part.Anchored = true
+        part.CanCollide, part.CanTouch, part.CanQuery = false, false, false
+        part.CastShadow = false
+        part.Parent = parent
+        return part
+    end
 
-    local function applyImageStyle(node, record, enabled)
-        record.styling = true
-        for property, state in pairs(record.styles or {}) do
-            local value = state.original
-            if enabled then value = imageStyle[property] end
-            state.rendered = value
-            node[property] = value
+    local function classicHead(parent)
+        local head = classicPart(parent, "FacilityAnonymousHead", Vector3.new(2, 1, 1), Vector3.zero)
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.Head
+        mesh.Parent = head
+        local face = Instance.new("Decal")
+        face.Name = "FacilityAnonymousFace"
+        face.Face = Enum.NormalId.Front
+        face.Texture = anonymousAvatar
+        face.Transparency = 0
+        face.Parent = head
+        return head
+    end
+
+    local function clearPreview(record)
+        if record.preview then
+            ownedVisuals[record.preview] = nil
+            record.preview:Destroy()
+            record.preview = nil
         end
-        record.styling = false
+    end
+
+    local function showPreview(node, record)
+        if record.preview and record.previewSource ~= record.original then clearPreview(record) end
+        if record.preview then
+            record.preview.ZIndex = node.ZIndex
+            record.preview.ImageTransparency = node.ImageTransparency
+            return
+        end
+        local viewport = Instance.new("ViewportFrame")
+        viewport.Name = "FacilityAnonymousPortrait"
+        viewport.Size = UDim2.fromScale(1, 1)
+        viewport.BackgroundTransparency = 1
+        viewport.Active = false
+        viewport.ZIndex = node.ZIndex
+        viewport.Ambient = Color3.fromRGB(200, 200, 200)
+        viewport.LightColor = anonymousColor
+        viewport.LightDirection = Vector3.new(-1, -1, -1)
+        ownedVisuals[viewport] = true
+        record.preview = viewport
+        record.previewSource = record.original
+        viewport.ImageTransparency = node.ImageTransparency
+        for _, child in ipairs(node:GetChildren()) do
+            if child:IsA("UICorner") then child:Clone().Parent = viewport end
+        end
+        local world = Instance.new("WorldModel")
+        world.Parent = viewport
+        local head = classicHead(world)
+        head.CFrame = CFrame.new(0, 2.5, 0)
+        classicPart(world, "Torso", Vector3.new(2, 2, 1), Vector3.new(0, 1, 0))
+        classicPart(world, "LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 1, 0))
+        classicPart(world, "RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 1, 0))
+        classicPart(world, "LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, -1, 0))
+        classicPart(world, "RightLeg", Vector3.new(1, 2, 1), Vector3.new(0.5, -1, 0))
+        local camera = Instance.new("Camera")
+        camera.FieldOfView = 35
+        local kind = (record.original:match("[?&/]type=([^&]+)") or "AvatarHeadShot"):lower()
+        if kind == "avatar" then
+            camera.CFrame = CFrame.lookAt(Vector3.new(0, 1, -11), Vector3.new(0, 0.5, 0))
+        elseif kind == "avatarbust" then
+            camera.CFrame = CFrame.lookAt(Vector3.new(0, 2, -7), Vector3.new(0, 1.6, 0))
+        else
+            camera.CFrame = CFrame.lookAt(Vector3.new(0, 2.6, -4.5), Vector3.new(0, 2.3, 0))
+        end
+        camera.Parent = viewport
+        viewport.CurrentCamera = camera
+        viewport.Parent = node
     end
 
     local function apply(node, record)
@@ -175,7 +243,12 @@ return function(Library)
             end
         end
         if record.property == "Image" then
-            applyImageStyle(node, record, value ~= record.original and value == anonymousAvatar)
+            if value ~= record.original and value == anonymousAvatar then
+                showPreview(node, record)
+                value = ""
+            else
+                clearPreview(record)
+            end
         end
         record.rendered = value
         if node[record.property] ~= value then
@@ -189,10 +262,10 @@ return function(Library)
         local record = watched[node]
         if not record then return end
         watched[node] = nil
+        clearPreview(record)
         for _, connection in ipairs(record.connections) do connection:Disconnect() end
         if restore then
             pcall(function() node[record.property] = record.original end)
-            if record.styles then pcall(function() applyImageStyle(node, record, false) end) end
         end
     end
 
@@ -204,23 +277,16 @@ return function(Library)
         else return end
         local record = { property = property, original = node[property], rendered = node[property], connections = {} }
         watched[node] = record
-        if property == "Image" then
-            record.styles = {}
-            for key in pairs(imageStyle) do
-                record.styles[key] = { original = node[key], rendered = node[key] }
-                table.insert(record.connections, node:GetPropertyChangedSignal(key):Connect(function()
-                    local state = record.styles[key]
-                    if record.styling or node[key] == state.rendered then return end
-                    state.original = node[key]
-                    apply(node, record)
-                end))
-            end
-        end
         table.insert(record.connections, node:GetPropertyChangedSignal(property):Connect(function()
             if record.writing or node[property] == record.rendered then return end
             record.original = node[property]
             apply(node, record)
         end))
+        if property == "Image" then
+            for _, key in ipairs({ "ZIndex", "ImageTransparency" }) do
+                table.insert(record.connections, node:GetPropertyChangedSignal(key):Connect(function() apply(node, record) end))
+            end
+        end
         if property == "Text" then
             table.insert(record.connections, node:GetPropertyChangedSignal("RichText"):Connect(function() apply(node, record) end))
         end
@@ -246,13 +312,13 @@ return function(Library)
     local character, characterConnections = nil, {}
     local characterVisuals = {}
     local neutralColor = anonymousColor
-    local ownedFaces, ownedVisuals = {}, {}
+    local ownedHeads = {}
 
     local function clearFaces()
-        for head, face in pairs(ownedFaces) do
-            ownedFaces[head] = nil
-            face:Destroy()
-            ownedVisuals[face] = nil
+        for head, visual in pairs(ownedHeads) do
+            ownedHeads[head] = nil
+            visual:Destroy()
+            ownedVisuals[visual] = nil
         end
     end
 
@@ -261,28 +327,36 @@ return function(Library)
             and manager.Options.AffectGame and manager.Options.HideAvatar
     end
 
+    local function syncHeads()
+        for head, visual in pairs(ownedHeads) do
+            if head.Parent == character then
+                visual.CFrame = head.CFrame
+                visual.LocalTransparencyModifier = head.LocalTransparencyModifier
+                local records = characterVisuals[head]
+                local transparency = records and records.properties.Transparency
+                visual.Transparency = transparency and transparency.original or 0
+            end
+        end
+    end
+
     local function refreshFaces()
         if not characterEnabled() or not character then clearFaces(); return end
-        for head, face in pairs(ownedFaces) do
-            if head.Parent ~= character or face.Parent ~= head then
-                ownedFaces[head] = nil
-                face:Destroy()
-                ownedVisuals[face] = nil
+        for head, visual in pairs(ownedHeads) do
+            if head.Parent ~= character or visual.Parent ~= character then
+                ownedHeads[head] = nil
+                visual:Destroy()
+                ownedVisuals[visual] = nil
             end
         end
         for _, head in ipairs(character:GetChildren()) do
-            if head:IsA("BasePart") and head.Name == "Head" and not ownedFaces[head] then
-                local face = Instance.new("Decal")
-                face.Name = "FacilityAnonymousFace"
-                face.Face = Enum.NormalId.Front
-                face.Texture = anonymousAvatar
-                face.Transparency = 0
-                face.Color3 = Color3.fromRGB(255, 255, 255)
-                face.ZIndex = 2
-                ownedFaces[head], ownedVisuals[face] = face, true
-                face.Parent = head
+            if head:IsA("BasePart") and head.Name == "Head" and not ownedHeads[head] then
+                local visual = classicHead(nil)
+                ownedHeads[head], ownedVisuals[visual] = visual, true
+                visual.CFrame = head.CFrame
+                visual.Parent = character
             end
         end
+        syncHeads()
     end
 
     local function applyVisual(node, property, record)
@@ -302,6 +376,12 @@ return function(Library)
         local records = characterVisuals[node]
         if not records then return end
         characterVisuals[node] = nil
+        local visual = ownedHeads[node]
+        if visual then
+            ownedHeads[node] = nil
+            visual:Destroy()
+            ownedVisuals[visual] = nil
+        end
         for property, record in pairs(records.properties) do
             record.connection:Disconnect()
             pcall(function() node[property] = record.original end)
@@ -336,7 +416,7 @@ return function(Library)
         if ownedVisuals[node] or not character or not node:IsDescendantOf(character) then return end
         local ancestor, accessory, body = node, false, nil
         while ancestor and ancestor ~= character do
-            if ancestor:IsA("Tool") then return end
+            if ownedVisuals[ancestor] or ancestor:IsA("Tool") then return end
             if ancestor:IsA("Accessory") then accessory = true end
             if ancestor:IsA("BasePart") and ancestor.Parent == character
                 and ancestor.Name ~= "HumanoidRootPart" then body = ancestor end
@@ -351,7 +431,10 @@ return function(Library)
             if node == body then
                 maskProperty(node, "Color", neutralColor)
                 if node:IsA("MeshPart") then maskProperty(node, "TextureID", "") end
-                if node.Name == "Head" then refreshFaces() end
+                if node.Name == "Head" then
+                    maskProperty(node, "Transparency", 1)
+                    refreshFaces()
+                end
             elseif node:IsA("Decal") or node:IsA("Texture") then
                 maskProperty(node, "Transparency", 1)
             elseif node:IsA("SpecialMesh") then maskProperty(node, "TextureId", "") end
@@ -384,6 +467,7 @@ return function(Library)
     local function startGame()
         if gameStarted then return end
         gameStarted = true
+        table.insert(connections, RunService.RenderStepped:Connect(syncHeads))
         table.insert(connections, LocalPlayer.CharacterAdded:Connect(attachCharacter))
         table.insert(connections, LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
             if character == oldCharacter then detachCharacter() end

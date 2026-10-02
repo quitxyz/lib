@@ -5,7 +5,10 @@ root=Path(__file__).resolve().parents[1]
 lua=LuaRuntime()
 lua.execute(r"""
 Vector2={zero="zero vector"}
-Enum={NormalId={Front="Front"}}
+Enum={NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
+Vector3={new=function(x,y,z) return {X=x,Y=y,Z=z} end,zero={X=0,Y=0,Z=0}}
+CFrame={new=function(...) return {position={...}} end,lookAt=function(a,b) return {eye=a,target=b} end}
+UDim2={fromScale=function(x,y) return {x=x,y=y} end}
 Color3={fromRGB=function(r,g,b) return r .. "," .. g .. "," .. b end}
 table.clear=function(t) for k in pairs(t) do t[k]=nil end end
 table.find=function(t,v) for i,x in ipairs(t) do if x==v then return i end end end
@@ -21,10 +24,11 @@ function signal()
 end
 nodes={}
 function node(class,parent,text)
- local props={ClassName=class,Text=text or '',Image='',RichText=false,Transparency=0,BackgroundColor3='original background',BackgroundTransparency=1,ImageColor3='original tint',ImageRectOffset='original offset',ImageRectSize='original rect'}
+ local props={ClassName=class,Text=text or '',Image='',RichText=false,Transparency=0,LocalTransparencyModifier=0,ImageTransparency=0,ZIndex=1,BackgroundColor3='original background',BackgroundTransparency=1,ImageColor3='original tint',ImageRectOffset='original offset',ImageRectSize='original rect'}
  local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal(),CharacterAdded=signal(),CharacterRemoving=signal()}
  local changed={}
  local methods={}
+ function methods:Clone() local copy=node(props.ClassName); return copy end
  function methods:IsA(c) return props.ClassName==c or (c=="BasePart" and (props.ClassName=="Part" or props.ClassName=="MeshPart")) end
  function methods:GetPropertyChangedSignal(k) changed[k]=changed[k] or signal(); return changed[k] end
  function methods:IsDescendantOf(root)
@@ -77,8 +81,9 @@ handle=node('Part',hat); handle.LocalTransparencyModifier=0
 sparkles=node('ParticleEmitter',handle); sparkles.Enabled=true
 tool=node('Tool',character); toolPart=node('Part',tool); toolPart.Color='tool color'
 Players={LocalPlayer=LocalPlayer}
+RunService={RenderStepped=signal()}
 game={GetService=function(_,name)
- if name=='Players' then return Players elseif name=='CoreGui' then return coreGui elseif name=='Workspace' then return workspace end
+ if name=='RunService' then return RunService elseif name=='Players' then return Players elseif name=='CoreGui' then return coreGui elseif name=='Workspace' then return workspace end
 end}
 facilityGui=node('ScreenGui',coreGui)
 Library={GuiRoots={[facilityGui]=true},Addons={},Connections={},RepaintHooks={},Painted={}}
@@ -174,37 +179,60 @@ local head='rbxthumb://type=AvatarHeadShot&id=123&w=150&h=150'
 local bust='rbxthumb://id=123&type=AvatarBust&w=420&h=420'
 local avatar=node('ImageLabel',facilityGui); avatar.Image=head
 local placeholder=p:GetAvatar()
-assert(placeholder=='rbxassetid://144080495' and avatar.Image==placeholder)
-assert(avatar.BackgroundColor3=='255,255,255' and avatar.BackgroundTransparency==0)
-assert(avatar.ImageRectSize==Vector2.zero)
-avatar.BackgroundColor3='updated background'; assert(avatar.BackgroundColor3=='255,255,255')
+assert(placeholder=='rbxassetid://144080495' and avatar.Image=="")
+assert(avatar.BackgroundColor3=='original background' and avatar.BackgroundTransparency==1)
+assert(avatar.ImageRectSize=='original rect')
+avatar.BackgroundColor3='updated background'; assert(avatar.BackgroundColor3=='updated background')
+local function preview(image)
+ for _,child in ipairs(image:GetChildren()) do if child.Name=='FacilityAnonymousPortrait' then return child end end
+end
+assert(preview(avatar) and preview(avatar):IsA('ViewportFrame'))
+assert(preview(avatar).CurrentCamera)
+local firstPreview=preview(avatar)
+avatar.Image=bust; assert(preview(avatar)~=firstPreview and firstPreview.Parent==nil)
+avatar.Image=head
+avatar.ImageTransparency=0.5; assert(preview(avatar).ImageTransparency==0.5)
 assert(panel.Controls.HideAvatar.Value==true)
 local gameAvatar=node('ImageButton',playerGui); gameAvatar.Image=bust
-assert(gameAvatar.Image==placeholder)
+assert(gameAvatar.Image=="")
 local otherAvatar=node('ImageLabel',playerGui)
 otherAvatar.Image='rbxthumb://type=AvatarHeadShot&id=456&w=150&h=150'
 assert(otherAvatar.Image:find('id=456',1,true))
 assert(p:ResolveImage('rbxthumb://type=GameIcon&id=123&w=150&h=150')=='rbxthumb://type=GameIcon&id=123&w=150&h=150')
 assert(p:ResolveImage('rbxassetid://123')=='rbxassetid://123')
-p:SetOptions({AffectGame=false}); assert(gameAvatar.Image==bust and avatar.Image==placeholder)
-p:SetOptions({AffectGame=true,AffectFacility=false}); assert(gameAvatar.Image==placeholder and avatar.Image==head)
+p:SetOptions({AffectGame=false}); assert(gameAvatar.Image==bust and avatar.Image=="")
+p:SetOptions({AffectGame=true,AffectFacility=false}); assert(gameAvatar.Image=="" and avatar.Image==head)
 p:SetOptions({AffectFacility=true})
-avatar.Image=bust; assert(avatar.Image==placeholder)
+avatar.Image=bust; assert(avatar.Image=="")
 panel.Controls.HideAvatar:Set(false)
 assert(avatar.Image==bust and gameAvatar.Image==bust)
+assert(preview(avatar)==nil and preview(gameAvatar)==nil)
 assert(avatar.BackgroundColor3=='updated background' and avatar.BackgroundTransparency==1)
 assert(avatar.ImageColor3=='original tint' and avatar.ImageRectSize=='original rect')
 panel.Controls.HideAvatar:Set(true)
-assert(avatar.Image==placeholder)
+assert(avatar.Image=="")
 avatar.Parent=nil; assert(avatar.Image==bust)
-avatar.Parent=facilityGui; assert(avatar.Image==placeholder)
+avatar.Parent=facilityGui; assert(avatar.Image=="")
 p:Restore(); assert(avatar.Image==bust)
 p:SetOptions({Enabled=true})
 local function ownFace(head)
- for _,child in ipairs(head:GetChildren()) do if child.Name=='FacilityAnonymousFace' then return child end end
+ for _,child in ipairs(head.Parent:GetChildren()) do
+  if child.Name=='FacilityAnonymousHead' then
+   for _,decal in ipairs(child:GetChildren()) do if decal.Name=='FacilityAnonymousFace' then return decal end end
+  end
+ end
 end
 assert(ownFace(body) and ownFace(body).Texture=='rbxassetid://144080495')
-assert(ownFace(body).Transparency==0 and ownFace(body).ZIndex==2)
+assert(ownFace(body).Transparency==0 and body.Transparency==1)
+local proxy=ownFace(body).Parent
+assert(proxy.Anchored and not proxy.CanCollide and not proxy.CanQuery and not proxy.CanTouch)
+body.CFrame=CFrame.new(4,5,6); body.LocalTransparencyModifier=0.8
+RunService.RenderStepped:Fire()
+assert(proxy.CFrame==body.CFrame and proxy.LocalTransparencyModifier==0.8)
+body.Transparency=0.4; RunService.RenderStepped:Fire()
+assert(body.Transparency==1 and proxy.Transparency==0.4)
+body.Transparency=0
+RunService.RenderStepped:Fire()
 assert(body.Color=='255,255,255' and body.TextureID=='')
 assert(face.Transparency==1 and shirt.ShirtTemplate=='')
 assert(handle.LocalTransparencyModifier==1 and sparkles.Enabled==false)
@@ -212,14 +240,14 @@ assert(rootPart.Color=='root color' and toolPart.Color=='tool color')
 body.Color='updated color'; assert(body.Color=='255,255,255')
 p:SetOptions({HideAvatar=false})
 assert(body.Color=='updated color' and body.TextureID=='body texture')
-assert(ownFace(body)==nil)
+assert(ownFace(body)==nil and body.Transparency==0)
 assert(face.Transparency==0 and shirt.ShirtTemplate=='shirt texture')
 assert(handle.LocalTransparencyModifier==0 and sparkles.Enabled==true)
 p:SetOptions({HideAvatar=true,AffectGame=false}); assert(body.Color=='updated color')
 p:SetOptions({AffectGame=true})
 assert(ownFace(body))
 p:Refresh(); local faceCount=0
-for _,child in ipairs(body:GetChildren()) do if child.Name=='FacilityAnonymousFace' then faceCount=faceCount+1 end end
+for _,child in ipairs(character:GetChildren()) do if child.Name=='FacilityAnonymousHead' then faceCount=faceCount+1 end end
 assert(faceCount==1)
 local pants=node('Pants',character); pants.PantsTemplate='late clothing'
 assert(pants.PantsTemplate=='')
@@ -245,6 +273,7 @@ assert(gameLabel.Text=='Real Display has joined' and newLabel.Text=='Real Displa
 assert(facilityLabel.Text=='teleport to RealUser')
 assert(not p.Alive and Library.PrivacyManager==nil)
 assert(avatar.Image==bust and gameAvatar.Image==bust)
+assert(preview(avatar)==nil and preview(gameAvatar)==nil)
 assert(newBody.Color=='new body color' and ownFace(newBody)==nil)
 newBody.Color='after unload'; assert(newBody.Color=='after unload')
 gameLabel.Text='RealUser again'; assert(gameLabel.Text=='RealUser again')

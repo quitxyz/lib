@@ -97,9 +97,9 @@ BuildPrivacyTab also accepts Title and Icon. Other players, server information, 
 
 ## Avatar thumbnails
 
-`hide avatar` replaces local-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar with the classic Smile image texture (`rbxassetid://144080495`) on a white background. The watcher handles ImageLabel and ImageButton instances, existing and newly created, using the same Facility/game switches as text. It preserves the latest original Image and restores it when disabled or unloaded. Other players, game icons, and unrelated images are unchanged. ViewportFrame models are not modified. Local character appearance is covered below.
+`hide avatar` recognizes local-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar. It hides that image and adds an owned ViewportFrame containing a white classic character with the Smile face. Headshot, bust, and full-avatar requests get different camera framing. This covers the recognized thumbnails in Facility and accessible Roblox/game menus, without replacing them with a flat face texture. Existing image backgrounds remain untouched; corner styling is copied when the preview is built. The original image returns and the preview is destroyed on disable/unload. Other players, game icons, and unrelated images remain unchanged.
 
-`GetAvatar(player)` returns an avatar headshot URI, or the classic face texture for the local player when Enabled and HideAvatar are true. Like the name getters, it does not apply scope switches. `ResolveImage(image, scope)` applies those switches and is used automatically by the watcher.
+`GetAvatar(player)` returns an avatar headshot URI, or the classic face texture for the local player when Enabled and HideAvatar are true. Like the name getters, it does not apply scope switches. `ResolveImage(image, scope)` applies those switches. The automatic watcher uses this to recognize masking, then renders the 3D preview; these low-level getters still return the face texture URI, not a generated thumbnail URL.
 
 Opaque asset/CDN URLs (including resolved thumbnail URLs without a player ID), and custom avatar renderers cannot be reliably identified by this first image resolver and are left unchanged. The automatic coverage currently recognizes rbxthumb URIs only.
 
@@ -107,7 +107,7 @@ Opaque asset/CDN URLs (including resolved thumbnail URLs without a player ID), a
 
 The same `hide avatar` toggle now covers the local character when `Enabled`, `HideAvatar`, and `AffectGame` are all true. The visible option is named **affect game**; its API key remains `AffectGame`, so existing calls still work.
 
-The anonymous appearance uses white body colors, clears ordinary MeshPart/SpecialMesh body textures and classic clothing, hides original body decals and adds one owned classic-face decal to the Head, and hides accessory parts and their particle/trail/beam effects. Accessories use LocalTransparencyModifier, which applies locally. No existing character, accessory, clothing, or mesh instances are replaced, destroyed, or reparented. The addon destroys only its own face decal when masking stops. Rig geometry, joints, Humanoid, animation objects, tools, movement, and targeting references remain intact.
+The anonymous appearance uses white body colors, clears ordinary MeshPart/SpecialMesh body textures and classic clothing, hides original body decals and the original Head, then renders an owned classic head in its place, and hides accessory parts and their particle/trail/beam effects. Accessories use LocalTransparencyModifier, which applies locally. No existing character, accessory, clothing, or mesh instances are replaced, destroyed, or reparented. The addon destroys only its own visual head and preview objects when masking stops. The visual head has no collision, touch, or query behavior; it follows the real Head each rendered frame, including its camera transparency. The original Head and its joints remain intact. Rig geometry, joints, Humanoid, animation objects, tools, movement, and targeting references remain intact.
 
 Original visual property values are tracked per instance. External updates become the latest originals while masking is active. Turning off identity privacy, hide avatar, or affect game restores those values; unload does the same and disconnects listeners. The manager follows CharacterAdded/CharacterRemoving, restores the old character, and watches new descendants on each respawn. Facility-only privacy does not mask the character.
 
@@ -129,7 +129,7 @@ The generic matcher changes complete tokens only: `user id: 123` becomes `user i
 
 ## Anonymous identity
 
-The first completed identity preset uses `seized.cc/1` for both names, displayed ID `0`, and a white appearance with the classic black face. The profile image uses that same face texture with a white background. This is a simple face portrait, not a rendered thumbnail of the full body. Existing corner radii remain in place. Image tint, crop rectangle, and background are restored along with the original image when masking stops.
+The first completed identity preset uses `seized.cc/1` for both names, displayed ID `0`, and a white appearance with the classic black face. Recognized profile images render a matching classic head/body in a ViewportFrame. The original thumbnail Image is restored when masking stops.
 
 ```lua
 PrivacyManager:SetAnonymous({ Prefix = "player " }) -- player 1
@@ -139,6 +139,10 @@ local identity = PrivacyManager:GetAnonymousIdentity()
 
 The returned identity is a fresh table, including a fresh Appearance table. Changing it does not modify the manager. Prefix accepts plain text up to 64 bytes (no control characters or angle brackets), and updates existing masked text immediately. The local identity reserves number 1; masking/numbering other players is a later step. This is a display label, so punctuation such as `seized.cc/` does not need to be a valid Roblox username.
 
-For manually built images using GetAvatar, set a white background while the returned image is the classic face texture. The automatic watcher handles styling when it recognizes a real avatar thumbnail URI. Custom, randomised, and badge controls are not exposed yet.
+For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Custom, randomised, and badge controls are not exposed yet.
 
-The face uses image texture 144080495, verified from Roblox's Smile face asset (144075659). The catalog face asset contains a Decal; its texture ID is the image used for both GUI images and character decals. The addon sets its owned decal's Transparency to 0 and ZIndex to 2. This avoids depending on the bundled `rbxasset://textures/face.png` path. The texture still requires Roblox asset loading; no automated mock test can verify its rendering on a particular device.
+The face uses image texture 144080495, verified from Roblox's Smile face asset (144075659). The catalog face asset contains a Decal; its texture ID is the image used for both GUI images and character decals. The addon applies the face to its own classic head with Transparency 0. This avoids depending on the bundled `rbxasset://textures/face.png` path. The texture still requires Roblox asset loading; no automated mock test can verify its rendering on a particular device.
+
+### Native avatar inspection
+
+Recognized thumbnail images in the player-list popup use the replacement preview. The full native **Examine Avatar** viewer can independently load an account's HumanoidDescription or create a separate 3D model. This version does not intercept that viewer's data requests or rewrite arbitrary native ViewportFrame models. It therefore cannot guarantee masking inside the full inspection viewer. It does not modify the account's actual avatar.
