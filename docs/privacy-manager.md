@@ -1,6 +1,6 @@
 # PrivacyManager
 
-This version masks the local player's username, display name, user ID, and recognizable avatar thumbnails. It does not change Player.Name, Player.DisplayName, Player.UserId, character references, dropdown selection values, or gameplay targets.
+This version masks the local player's identity and, independently, other server players' identities, including names, user IDs, recognizable thumbnails and character visuals. It does not change Player.Name, Player.DisplayName, Player.UserId, character references, dropdown selection values, or gameplay targets.
 
 ## Setup
 
@@ -13,7 +13,7 @@ local PrivacyManager = assert(Library:LoadAddon("PrivacyManager"))
 local privacy = PrivacyManager:BuildPrivacySection(settingsTab, 1)
 ```
 
-The section contains **user identity**, with a gear for:
+The section contains **user identity** and **players identity**, each with its own gear for:
 - hide username
 - hide display name
 - hide avatar
@@ -21,7 +21,7 @@ The section contains **user identity**, with a gear for:
 - affect facility
 - affect game
 
-Defaults: identity masking off, both name fields, avatar masking, and user ID masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing gear options refreshes affected visuals automatically; avatar-only changes skip name text.
+Defaults: identity masking off, both name fields, avatar masking, and user ID masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning either master toggle off restores that group’s visuals. Other players currently support anonymous identities only; their method selector is disabled. Changing gear options refreshes affected visuals automatically; avatar-only changes skip name text.
 
 Alternatively:
 
@@ -29,7 +29,7 @@ Alternatively:
 local privacy = PrivacyManager:BuildPrivacyTab(Window)
 ```
 
-Both builders return a panel with Section, Instance, Controls, Alive, and Destroy(). BuildPrivacyTab also returns Tab on that panel. Multiple panels reflect the same manager options. Destroying a panel removes its controls; call Restore or Destroy on the manager to stop masking.
+Both builders return a panel with Section, Instance, Controls, PlayerControls, Alive, and Destroy(). BuildPrivacyTab also returns Tab on that panel. Multiple panels reflect the same manager options. Destroying a panel removes its controls; call Restore or Destroy on the manager to stop masking.
 
 ## Resolver
 
@@ -52,11 +52,11 @@ local shownId = PrivacyManager:GetUserId(player)
 local text = PrivacyManager:ResolveText("teleport to RealName", "facility", false)
 
 PrivacyManager:Refresh()
-PrivacyManager:Restore() -- disable masking and restore text
+PrivacyManager:Restore() -- disable both identity groups and restore visuals
 PrivacyManager:Destroy() -- restore, disconnect, remove owned panels
 ```
 
-The local anonymous replacement defaults to `seized.cc/1`. SetAnonymous can change the prefix (for example `player ` produces `player 1`). GetIdentity returns a new table containing Name, DisplayName, and a display UserId (0 for anonymous ID masking, or the selected account/custom ID). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
+The local anonymous replacement defaults to `seized.cc/1`. SetAnonymous can change the prefix (for example `player ` produces `player 1`). GetIdentity returns a new table containing Name, DisplayName, and a display UserId (0 for anonymous ID masking, or the selected account/custom ID). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players use PlayerOptions independently, as described below. Never use a masked name as a gameplay identifier.
 
 SetLibrary(Library) is accepted for consistency; a loaded manager belongs to its creating library and cannot be moved to another instance. Library:LoadAddon caches it. Destroy releases that cached instance so it may be loaded again.
 
@@ -74,7 +74,7 @@ When enabled for the first time, the manager scans PlayerGui, accessible CoreGui
 
 Each text element retains its latest original text plus its last rendered replacement. External updates replace that original; toggling privacy off restores it. Editable TextBoxes are intentionally excluded to preserve input and command values. Other scripts that continually rewrite the same label may conflict with masking. If a game uses visible label text itself as gameplay input, it needs an adapter before enabling that coverage.
 
-This is best-effort text coverage, not universal identity protection: native humanoid name tags and inaccessible platform UI are not handled yet. Avatar images and local character masking are described below. There are no player-property assignments or chat callback overrides.
+This is best-effort text coverage, not universal identity protection: native humanoid name tags and inaccessible platform UI are not handled yet. Avatar images and character masking are described below. There are no player-property assignments or chat callback overrides.
 
 ## Customization
 
@@ -93,19 +93,19 @@ PrivacyManager:BuildPrivacySection(settingsTab, 1, {
 })
 ```
 
-BuildPrivacyTab also accepts Title and Icon. Other players, server information and a general adapter registry are later steps. Custom and randomised local identities are available. Explicit preview registration is available below.
+BuildPrivacyTab also accepts Title and Icon. Server information and a general adapter registry are later steps. PlayerLabels overrides the other-player control labels using the same keys as Labels, plus Method. Custom and randomised local identities are available. Explicit preview registration is available below.
 
 ## Avatar thumbnails
 
-`hide avatar` recognizes local-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar. It hides that image and adds an owned ViewportFrame containing a white classic character with the Smile face. Headshot, bust, and full-avatar requests get different camera framing. Headshots use a close crop centered on the face; both the portrait and character use a classic head mesh scale of 1.25. This covers the recognized thumbnails in Facility and accessible Roblox/game menus, without replacing them with a flat face texture. Existing image backgrounds remain untouched; corner styling is copied when the preview is built. The original image returns and the preview is destroyed on disable/unload. Other players, game icons, and unrelated images remain unchanged.
+`hide avatar` recognizes tracked-player `rbxthumb://` images of type AvatarHeadShot, AvatarBust, or Avatar. It hides that image and adds an owned ViewportFrame containing a white classic character with the Smile face. Headshot, bust, and full-avatar requests get different camera framing. Headshots use a close crop centered on the face; both the portrait and character use a classic head mesh scale of 1.25. This covers the recognized thumbnails in Facility and accessible Roblox/game menus, without replacing them with a flat face texture. Existing image backgrounds remain untouched; corner styling is copied when the preview is built. The original image returns and the preview is destroyed on disable/unload. Players whose privacy group is disabled, game icons, and unrelated images remain unchanged.
 
-`GetAvatar(player)` returns an avatar headshot URI, or the classic face texture for the local player when Enabled and HideAvatar are true. Like the name getters, it does not apply scope switches. `ResolveImage(image, scope)` applies those switches. The automatic watcher uses this to recognize masking, then renders the 3D preview; these low-level getters still return the face texture URI, not a generated thumbnail URL.
+`GetAvatar(player)` returns an avatar headshot URI, or the classic face texture for an anonymous player when that group’s Enabled and HideAvatar are true. Like the name getters, it does not apply scope switches. `ResolveImage(image, scope)` applies those switches. The automatic watcher uses this to recognize masking, then renders the 3D preview; these low-level getters still return the face texture URI, not a generated thumbnail URL.
 
 Opaque asset/CDN URLs (including resolved thumbnail URLs without a player ID), and custom avatar renderers cannot be reliably identified by this first image resolver and are left unchanged. The automatic coverage currently recognizes rbxthumb URIs only.
 
-## Local character appearance
+## Character appearance
 
-The same `hide avatar` toggle now covers the local character when `Enabled`, `HideAvatar`, and `AffectGame` are all true. The visible option is named **affect game**; its API key remains `AffectGame`, so existing calls still work.
+The same `hide avatar` toggle now covers each tracked character when its group’s `Enabled`, `HideAvatar`, and `AffectGame` are all true. The visible option is named **affect game**; its API key remains `AffectGame`, so existing calls still work.
 
 The anonymous appearance uses white body colors, clears ordinary MeshPart/SpecialMesh body textures and classic clothing, hides original body decals and the original Head, then renders an owned classic head in its place, and hides accessory parts and their particle/trail/beam effects. Accessories use LocalTransparencyModifier, which applies locally. No existing character, accessory, clothing, or mesh instances are replaced, destroyed, or reparented. The addon destroys only its own visual head and preview objects when masking stops. The visual head has no collision, touch, or query behavior; it follows the real Head each rendered frame, including its camera transparency. The original Head and its joints remain intact. Rig geometry, joints, Humanoid, animation objects, tools, movement, and targeting references remain intact.
 
@@ -119,11 +119,11 @@ This is a neutral visual treatment, not a complete generic avatar replacement. B
 PrivacyManager:BuildPrivacySection(settingsTab, 1, { GearMaxHeight = 160 })
 ```
 
-GearMaxHeight is optional and also works with BuildPrivacyTab. It caps the popup's total height and enables vertical wheel/touch scrolling when needed. Omit it for the previous natural-height behavior. The popup continues opening downward.
+GearMaxHeight is optional and also works with BuildPrivacyTab. It caps the popup's total height and enables vertical wheel/touch scrolling when needed. The privacy gears default to a 220-pixel cap. The popup continues opening downward.
 
 ## Displayed user IDs
 
-`HideUserIds` replaces the local player's decimal UserId with the selected display ID (`0` for anonymous) in presentation text, using the same Facility/game scope switches and RichText handling as names. It is selected by default; the master privacy switch remains off by default. `GetUserId(player)` returns the display ID as a number and does not apply scope switches, matching the identity getters. GetIdentity also returns this display ID. Always use the real Player.UserId for gameplay, thumbnail lookup, and identity targeting.
+`HideUserIds` replaces a tracked player's decimal UserId with the selected display ID (`0` for anonymous) in presentation text, using the same Facility/game scope switches and RichText handling as names. It is selected by default; the master privacy switch remains off by default. `GetUserId(player)` returns the display ID as a number and does not apply scope switches, matching the identity getters. GetIdentity also returns this display ID. Always use the real Player.UserId for gameplay, thumbnail lookup, and identity targeting.
 
 The generic matcher changes complete tokens only: `user id: 123` becomes `user id: 0`, while `1234`, `x123`, and `123_x` remain unchanged. RichText attributes, editable TextBoxes, registered selection values, and underlying game data are untouched. Existing console display, exports, and newly forwarded script logs use the shared resolver automatically. Originals are restored on disable/unload. A matching unrelated standalone number cannot be distinguished from a user ID in generic text and will also be masked. This option does not hide place, universe, or job IDs.
 
@@ -137,9 +137,9 @@ local identity = PrivacyManager:GetAnonymousIdentity()
 -- Name, DisplayName, UserId, Avatar, Appearance.BodyColor, Appearance.Face
 ```
 
-The returned identity is a fresh table, including a fresh Appearance table. Changing it does not modify the manager. Prefix accepts plain text up to 64 bytes (no control characters or angle brackets), and updates existing masked text immediately. The local identity reserves number 1; masking/numbering other players is a later step. This is a display label, so punctuation such as `seized.cc/` does not need to be a valid Roblox username.
+The returned identity is a fresh table, including a fresh Appearance table. Changing it does not modify the manager. Prefix accepts plain text up to 64 bytes (no control characters or angle brackets), and updates existing masked text immediately. The local identity reserves number 1; other players receive stable numbers starting at 2. This is a display label, so punctuation such as `seized.cc/` does not need to be a valid Roblox username.
 
-For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Manual custom identities are supported below. Badge application is described below. Randomised identities are not implemented yet.
+For automatic 3D portraits, keep the real avatar thumbnail URI in the ImageLabel/ImageButton and let the watcher resolve it. GetAvatar returns a texture URI only. Manual custom identities are supported below. Badge controls are deferred. Randomised local identities are described below.
 
 The face uses image texture 144080495, verified from Roblox's Smile face asset (144075659). The catalog face asset contains a Decal; its texture ID is the image used for both GUI images and character decals. The addon applies the face to its own classic head with Transparency 0. This avoids depending on the bundled `rbxasset://textures/face.png` path. The texture still requires Roblox asset loading; no automated mock test can verify its rendering on a particular device.
 
@@ -150,7 +150,7 @@ Recognized thumbnail images in the player-list popup use the replacement preview
 
 ## Character previews in game and Facility UI
 
-Existing and newly created Models inside watched ViewportFrames share the character appearance controller. Automatic recognition requires a direct Humanoid plus either a `UserId`, `PlayerUserId`, or `OwnerUserId` attribute matching the local player's ID, or an exact model name matching the real username or numeric user ID. An explicit ID attribute takes precedence over the name. Display names alone are not used because they are not unique. Models belonging to other players and unrelated units are left alone.
+Existing and newly created Models inside watched ViewportFrames share the character appearance controller. Automatic recognition requires a direct Humanoid plus either a `UserId`, `PlayerUserId`, or `OwnerUserId` attribute matching a current player's ID, or an exact model name matching the real username or numeric user ID. An explicit ID attribute takes precedence over the name. Display names alone are not used because they are not unique. The resolved owner’s privacy group controls masking. Unidentified models and unrelated units are left alone.
 
 The existing `Enabled`, `HideAvatar`, `AffectGame`, and `AffectFacility` switches control previews too. Toggles refresh open previews; new accessories, clothing, and heads are watched. Preview accessory parts use `Transparency`, while world accessories retain `LocalTransparencyModifier`. The model's pose, animation objects, camera, and real identity metadata are preserved. The latest captured visual properties are restored on disable, scope changes, or unload. A model already cloned from a masked character has masked source properties: restoring it cannot recover clothing data that was absent before the watcher saw it; the game must rebuild that preview from the original appearance.
 
@@ -164,7 +164,7 @@ local unregister = PrivacyManager:RegisterPreview(previewModel, LocalPlayer)
 unregister()
 ```
 
-Registration handles only local-player models for now. Destroying a registered model releases its watchers. This API does not guess UI paths or intercept avatar-loading requests. Native inspection models are covered only if accessible and identifiable, or explicitly registered. Anonymous portraits generated by PrivacyManager are excluded from this watcher.
+Registration accepts any current player; pass that real Player as the second argument. Leaving players’ previews are restored, and automatically identifiable previews are refreshed on rejoin. Destroying a registered model releases its watchers. This API does not guess UI paths or intercept avatar-loading requests. Native inspection models are covered only if accessible and identifiable, or explicitly registered. Anonymous portraits generated by PrivacyManager are excluded from this watcher.
 
 
 ## Custom identity editor
@@ -173,7 +173,7 @@ Select **custom**, open **edit custom identity**, enter a username, display name
 
 Appearance supports **anonymous** (the white classic appearance) and **keep mine** (restore the real thumbnails and character appearance while retaining text privacy). Switching back to anonymous restores the anonymous identity. Disabling privacy restores the original visuals.
 
-Draft edits only apply after pressing the button. Closing and reopening keeps the draft during the panel lifetime; this editor does not persist it to disk. Account loading is available as described below. Badge choices apply with the identity and refresh affected Facility/game visuals.
+Draft edits only apply after pressing the button. Closing and reopening keeps the draft during the panel lifetime; this editor does not persist it to disk. Account loading is available as described below. Badge selectors remain disabled and do not affect visuals.
 
 The manual API accepts partial updates:
 
@@ -232,7 +232,7 @@ The previous replacement stays in effect while loading (anonymous on a fresh man
 
 A successful identity and its appearance templates remain cached for the lifetime of the loaded manager. Turning privacy off or switching methods does not reroll it. Switching away during loading allows the result to finish caching without changing the selected method. Failed discovery uses the current anonymous identity and does not automatically retry on toggles. Unloading destroys the cache; a newly created manager begins a new session. If the real owner of the selected random account subsequently joins the server, the random identity falls back to anonymous to avoid displaying another present player's identity.
 
-The section shows a lowercase loading, ready or anonymous-fallback status when randomised is selected. Individual hide toggles and Facility/game scopes still apply, including to thumbnails, live character visuals and recognised preview rigs. Other players remain unchanged. Badge controls stay disabled.
+The section shows a lowercase loading, ready or anonymous-fallback status when randomised is selected. Individual hide toggles and Facility/game scopes still apply, including to thumbnails, live character visuals and recognised preview rigs. Other players use their separate anonymous settings; this randomised method applies only to the local player. Badge controls stay disabled.
 
 Optional configuration must be set **before the first randomised selection**:
 
@@ -249,3 +249,31 @@ local status = PrivacyManager:GetRandomStatus() -- idle, loading, ready, fallbac
 ```
 
 IDs must be positive safe integers with MinUserId <= MaxUserId. Attempts accepts 1–20 and counts candidate draws, including excluded or repeated IDs. The defaults require no template changes. Background loading may take several seconds; building or applying the appearance still has a local rendering cost. Runtime network and mobile timing must be checked in Roblox.
+
+## Other players: anonymous identity
+
+Enable **players identity** to mask other server players independently of **user identity**. Its gear has separate hide and scope settings. Anonymous is the only supported method in this step; custom and randomised local settings remain unchanged.
+
+```lua
+PrivacyManager:SetPlayerOptions({
+    Enabled = true,
+    HideUsername = true,
+    HideDisplayName = true,
+    HideAvatar = true,
+    HideUserIds = true,
+    AffectFacility = true,
+    AffectGame = true,
+    Method = "anonymous",
+})
+
+local identity = PrivacyManager:GetIdentity(otherPlayer)
+local anonymous = PrivacyManager:GetAnonymousIdentity(otherPlayer)
+```
+
+Options default to disabled, with all hide fields selected, Facility selected and game off. Call SetPlayerOptions to update them; directly changing the table does not refresh visuals. Controls remain session-only and require no template changes when using the existing section builder.
+
+Each real UserId receives one alias for the manager’s lifetime: `seized.cc/2`, `seized.cc/3`, and so on. The local player reserves `/1` even when local privacy is off. Numbers are not reused when players leave; rejoining with the same UserId restores the same alias. Anonymous display IDs are all `0`, not unique identifiers. SetAnonymous changes the prefix for both groups.
+
+Existing players, later joins and respawns are tracked. Recognized thumbnails, live characters and recognized or registered previews use the same owner-specific settings. Leaving restores the departed character and tracked previews, while identity snapshots remain available to mask old console text. Unload disconnects listeners and restores tracked visuals. Player objects, IDs, character references and selection values remain real.
+
+Generic text cannot distinguish players sharing a display name: an ambiguous shared display name becomes `player`. An exact username takes precedence over a display-name match. Typed GetName/GetDisplayName calls retain the individual alias. Text rules are cached between changes; anonymous player masking adds no account lookups. Enabling game appearance masking in a populated server still has an initial scan/rendering cost.

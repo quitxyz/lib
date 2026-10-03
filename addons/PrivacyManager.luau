@@ -1,5 +1,5 @@
 -- Facility addon | PrivacyManager
--- Presentation-only local identity masking. Real player references stay untouched.
+-- Presentation-only player identity masking. Real player references stay untouched.
 return function(Library)
     if Library.PrivacyManager and Library.PrivacyManager.Alive then return Library.PrivacyManager end
     local Players = game:GetService("Players")
@@ -10,12 +10,40 @@ return function(Library)
         Enabled = false, HideUsername = true, HideDisplayName = true, HideAvatar = true, HideUserIds = true,
         AffectFacility = true, AffectGame = false, Method = "anonymous",
     } }
+    manager.PlayerOptions = {
+        Enabled = false, HideUsername = true, HideDisplayName = true, HideAvatar = true, HideUserIds = true,
+        AffectFacility = true, AffectGame = false, Method = "anonymous",
+    }
     Library.PrivacyManager = manager
     local watched, roots, connections, panels = {}, {}, {}, {}
     local anonymousPrefix = "seized.cc/"
     local anonymousName = anonymousPrefix .. "1"
     local anonymousAvatar = "rbxassetid://144080495"
     local anonymousColor = Color3.fromRGB(255, 255, 255)
+
+    local identityList, identitiesById, activePlayers, activeById = {}, {}, {}, {}
+    local textRules = {}
+    local nextIdentity = 2
+    local function isLocal(player) return not player or player.UserId == LocalPlayer.UserId end
+    local function optionsFor(player) return isLocal(player) and manager.Options or manager.PlayerOptions end
+    local function scopeEnabled(options, scope)
+        return options.Enabled and (scope == "game" and options.AffectGame
+            or scope ~= "game" and options.AffectFacility)
+    end
+    local function rememberIdentity(player)
+        local record = identitiesById[player.UserId]
+        if not record then
+            record = { UserId = player.UserId, Index = isLocal(player) and 1 or nextIdentity }
+            if not isLocal(player) then nextIdentity = nextIdentity + 1 end
+            identitiesById[player.UserId] = record
+            table.insert(identityList, record)
+        end
+        if record.Name ~= player.Name or record.DisplayName ~= player.DisplayName then
+            record.Name, record.DisplayName = player.Name, player.DisplayName
+            textRules = {}
+        end
+        return record
+    end
 
     local imageNodes = {}
     local custom = { Name = "seized", DisplayName = "seized", UserId = 0, Appearance = "anonymous" }
@@ -92,7 +120,11 @@ return function(Library)
         if not ok then error(result, 2) end
         return result
     end
-    local function replacementIdentity()
+    local function replacementIdentity(player)
+        if not isLocal(player) then
+            local name = anonymousPrefix .. rememberIdentity(player).Index
+            return { Name = name, DisplayName = name, UserId = 0, Appearance = "anonymous" }
+        end
         if manager.Options.Method == "custom" then return custom end
         if manager.Options.Method == "randomised" then
             if randomIdentity then return randomIdentity end
@@ -136,8 +168,8 @@ return function(Library)
         end)
     end
 
-    local function hideAppearance()
-        return manager.Options.HideAvatar and replacementIdentity().Appearance ~= "keep mine"
+    local function hideAppearance(player)
+        return optionsFor(player).HideAvatar and replacementIdentity(player).Appearance ~= "keep mine"
     end
     function manager:GetCustom()
         return { Name = custom.Name, DisplayName = custom.DisplayName, UserId = custom.UserId, Appearance = custom.Appearance, AccountId = custom.AccountId }
@@ -168,9 +200,10 @@ return function(Library)
         self:SetOptions({ Method = method })
     end
 
-    function manager:GetAnonymousIdentity()
+    function manager:GetAnonymousIdentity(player)
+        local name = isLocal(player) and anonymousName or anonymousPrefix .. rememberIdentity(player).Index
         return {
-            Name = anonymousName, DisplayName = anonymousName, UserId = 0,
+            Name = name, DisplayName = name, UserId = 0,
             Avatar = anonymousAvatar,
             Appearance = { BodyColor = anonymousColor, Face = anonymousAvatar },
         }
@@ -223,37 +256,54 @@ return function(Library)
 
     function manager:GetIdentity(player)
         player = player or LocalPlayer
-        local enabled = self.Alive and self.Options.Enabled and player == LocalPlayer
-        local identity = replacementIdentity()
+        local options = optionsFor(player)
+        local enabled = self.Alive and options.Enabled
+        local identity = enabled and replacementIdentity(player)
         return {
-            Name = enabled and self.Options.HideUsername and identity.Name or player.Name,
-            DisplayName = enabled and self.Options.HideDisplayName and identity.DisplayName or player.DisplayName,
-            UserId = enabled and self.Options.HideUserIds and identity.UserId or player.UserId,
+            Name = enabled and options.HideUsername and identity.Name or player.Name,
+            DisplayName = enabled and options.HideDisplayName and identity.DisplayName or player.DisplayName,
+            UserId = enabled and options.HideUserIds and identity.UserId or player.UserId,
         }
     end
     function manager:GetName(player) return self:GetIdentity(player).Name end
     function manager:GetDisplayName(player) return self:GetIdentity(player).DisplayName end
     function manager:GetUserId(player) return self:GetIdentity(player).UserId end
 
-    function manager:ResolveText(value, scope, richText)
-        if type(value) ~= "string" or not self.Alive or not self.Options.Enabled then return value end
-        if scope == "game" then
-            if not self.Options.AffectGame then return value end
-        elseif not self.Options.AffectFacility then return value end
-        local names, replacements = {}, {}
-        local identity = replacementIdentity()
-        local function add(real, replacement)
+    local function rulesFor(scope, richText)
+        local key = (scope == "game" and "game" or "facility") .. (richText and "rich" or "plain")
+        if textRules[key] then return textRules[key] end
+        local rules = { names = {}, replacements = {} }
+        local priorities = {}
+        local function add(real, replacement, priority)
             if real == "" then return end
-            if replacements[real] == nil then table.insert(names, real) end
-            if richText then
-                replacement = replacement:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+            if richText then replacement = replacement:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;") end
+            local oldPriority = priorities[real]
+            if not oldPriority then table.insert(rules.names, real) end
+            if not oldPriority or priority > oldPriority then
+                rules.replacements[real], priorities[real] = replacement, priority
+            elseif priority == oldPriority and rules.replacements[real] ~= replacement then
+                -- Shared display names cannot identify a player in arbitrary text.
+                rules.replacements[real] = "player"
             end
-            replacements[real] = replacement
         end
-        if self.Options.HideDisplayName then add(LocalPlayer.DisplayName, identity.DisplayName) end
-        -- A shared username/display-name token is ambiguous in generic text; username wins.
-        if self.Options.HideUsername then add(LocalPlayer.Name, identity.Name) end
-        if self.Options.HideUserIds then add(tostring(LocalPlayer.UserId), ("%.0f"):format(identity.UserId)) end
+        for _, record in ipairs(identityList) do
+            local options = optionsFor(record)
+            if scopeEnabled(options, scope) then
+                local identity = replacementIdentity(record)
+                if options.HideDisplayName then add(record.DisplayName, identity.DisplayName, 1) end
+                if options.HideUsername then add(record.Name, identity.Name, 2) end
+                if options.HideUserIds then add(("%.0f"):format(record.UserId), ("%.0f"):format(identity.UserId), 3) end
+            end
+        end
+        textRules[key] = rules
+        return rules
+    end
+
+    function manager:ResolveText(value, scope, richText)
+        if type(value) ~= "string" or not self.Alive then return value end
+        if not scopeEnabled(self.Options, scope) and not scopeEnabled(self.PlayerOptions, scope) then return value end
+        local rules = rulesFor(scope, richText)
+        local names, replacements = rules.names, rules.replacements
         if #names == 0 then return value end
         if not richText then return replaceTokens(value, names, replacements) end
         -- Preserve markup attributes; only replace visible text between tags.
@@ -270,18 +320,16 @@ return function(Library)
 
 
     function manager:ResolveImage(value, scope)
-        if type(value) ~= "string" or not self.Alive or not self.Options.Enabled or not hideAppearance() then return value end
-        if scope == "game" then
-            if not self.Options.AffectGame then return value end
-        elseif not self.Options.AffectFacility then return value end
+        if type(value) ~= "string" or not self.Alive then return value end
         local query = value:match("^rbxthumb://(.+)$")
         if not query then return value end
         local params = {}
         for key, item in query:gmatch("([^&=?]+)=([^&]+)") do params[key:lower()] = item end
         local kind = (params.type or ""):lower()
-        if tonumber(params.id) == LocalPlayer.UserId
+        local record = identitiesById[tonumber(params.id)]
+        if record and scopeEnabled(optionsFor(record), scope) and hideAppearance(record)
             and (kind == "avatarheadshot" or kind == "avatarbust" or kind == "avatar") then
-            local identity = replacementIdentity()
+            local identity = replacementIdentity(record)
             if identity.Appearance == "loaded account" then
                 return value:gsub("([&?/]id=)%d+", function(prefix) return prefix .. ("%.0f"):format(identity.AccountId) end)
             end
@@ -292,8 +340,8 @@ return function(Library)
 
     function manager:GetAvatar(player)
         player = player or LocalPlayer
-        if self.Alive and self.Options.Enabled and hideAppearance() and player == LocalPlayer then
-            local identity = replacementIdentity()
+        if self.Alive and optionsFor(player).Enabled and hideAppearance(player) then
+            local identity = replacementIdentity(player)
             if identity.Appearance == "loaded account" then
                 return "rbxthumb://type=AvatarHeadShot&id=" .. ("%.0f"):format(identity.AccountId) .. "&w=150&h=150"
             end
@@ -480,7 +528,7 @@ return function(Library)
     end
 
     -- One reversible appearance controller for live characters and UI copies.
-    local function createAppearance(model, isPreview, enabled)
+    local function createAppearance(model, isPreview, enabled, player)
         local inheritedHead = false
         if isPreview then
             for _, child in ipairs(model:GetChildren()) do
@@ -500,7 +548,7 @@ return function(Library)
             accountVisual, accountKey, accountParts = nil, nil, nil
         end
         local function loadedAppearance()
-            return replacementIdentity().Appearance == "loaded account"
+            return replacementIdentity(player).Appearance == "loaded account"
         end
 
         local function clearFaces()
@@ -513,7 +561,7 @@ return function(Library)
         end
 
         local function characterEnabled()
-            return manager.Alive and manager.Options.Enabled and hideAppearance() and enabled()
+            return manager.Alive and optionsFor(player).Enabled and hideAppearance(player) and enabled()
         end
 
         local function syncHeads()
@@ -552,7 +600,7 @@ return function(Library)
                 end
                 local humanoid = character:FindFirstChildOfClass("Humanoid")
                 local kind = humanoid and humanoid.RigType or Enum.HumanoidRigType.R6
-                local identity = replacementIdentity()
+                local identity = replacementIdentity(player)
                 local template = accounts[identity.AccountId] and accounts[identity.AccountId][kind]
                 local key = tostring(identity.AccountId) .. tostring(kind)
                 if accountKey ~= key then clearAccountVisual() end
@@ -764,18 +812,24 @@ return function(Library)
         }
     end
 
-    local character, characterMask
-    local function detachCharacter()
-        if characterMask then characterMask.Destroy() end
-        character, characterMask = nil, nil
+    local function detachCharacter(record)
+        if record.mask then record.mask.Destroy() end
+        record.model, record.mask = nil, nil
     end
-    local function attachCharacter(model)
-        if character == model then return end
-        detachCharacter()
-        character = model
-        if model then
-            characterMask = createAppearance(model, false, function() return manager.Options.AffectGame end)
+    local function refreshCharacter(player, record)
+        local options = optionsFor(player)
+        if not record.mask and record.model and options.Enabled and options.AffectGame and hideAppearance(player) then
+            record.mask = createAppearance(record.model, false, function()
+                return activePlayers[player] == record and optionsFor(player).AffectGame
+            end, player)
         end
+        if record.mask then record.mask.Refresh() end
+    end
+    local function attachCharacter(player, record, model)
+        if record.model == model then return end
+        detachCharacter(record)
+        record.model = model
+        refreshCharacter(player, record)
     end
 
     local previewModels = {}
@@ -788,29 +842,34 @@ return function(Library)
         end
         return viewport and scopeOf(model) or nil
     end
-    local function previewIsLocal(model, record)
-        if record.player then return record.player == LocalPlayer end
+    local function previewOwner(model, record)
+        if record.player then return activePlayers[record.player] and record.player or nil end
         -- Explicit ownership wins over names. Never infer from a display name alone.
         for _, key in ipairs({ "UserId", "PlayerUserId", "OwnerUserId" }) do
             local value = model:GetAttribute(key)
-            if value ~= nil then return tonumber(value) == LocalPlayer.UserId end
+            if value ~= nil then return activeById[tonumber(value)] end
         end
-        return model.Name == LocalPlayer.Name or model.Name == tostring(LocalPlayer.UserId)
+        for player in pairs(activePlayers) do
+            if model.Name == player.Name or model.Name == tostring(player.UserId) then return player end
+        end
     end
     local function refreshPreview(model, record)
         if record.refreshing then return end
         record.refreshing = true
         local scope = previewScope(model)
-        local eligible = scope and previewIsLocal(model, record) and model:FindFirstChildOfClass("Humanoid")
-        if eligible and not record.mask then
+        local owner = scope and previewOwner(model, record)
+        local eligible = owner and model:FindFirstChildOfClass("Humanoid")
+        if record.mask and (not eligible or record.owner ~= owner) then
+            record.mask.Destroy()
+            record.mask, record.owner = nil, nil
+        end
+        if eligible and not record.mask and scopeEnabled(optionsFor(owner), scope) and hideAppearance(owner) then
+            record.owner = owner
             record.mask = createAppearance(model, true, function()
                 local currentScope = previewScope(model)
-                return previewIsLocal(model, record) and (currentScope == "facility" and manager.Options.AffectFacility
-                    or currentScope == "game" and manager.Options.AffectGame)
-            end)
-        elseif not eligible and record.mask then
-            record.mask.Destroy()
-            record.mask = nil
+                return currentScope and previewOwner(model, record) == owner
+                    and scopeEnabled(optionsFor(owner), currentScope)
+            end, owner)
         end
         if record.mask then record.mask.Refresh() end
         record.refreshing = false
@@ -841,7 +900,7 @@ return function(Library)
     -- Call for each newly created model; the returned function removes that binding.
     function manager:RegisterPreview(model, player)
         assert(self.Alive and model:IsA("Model") and previewScope(model), "preview must be a Model inside a watched ViewportFrame")
-        assert(player == LocalPlayer, "only local-player previews are supported yet")
+        assert(activePlayers[player], "preview owner must be a current player")
         watchPreview(model)
         local record = previewModels[model]
         local binding = {}
@@ -855,7 +914,7 @@ return function(Library)
     end
 
     table.insert(connections, RunService.RenderStepped:Connect(function()
-        if characterMask then characterMask.Sync() end
+        for _, record in pairs(activePlayers) do if record.mask then record.mask.Sync() end end
         for _, record in pairs(previewModels) do if record.mask then record.mask.Sync() end end
     end))
 
@@ -863,11 +922,6 @@ return function(Library)
     local function startGame()
         if gameStarted then return end
         gameStarted = true
-        table.insert(connections, LocalPlayer.CharacterAdded:Connect(attachCharacter))
-        table.insert(connections, LocalPlayer.CharacterRemoving:Connect(function(oldCharacter)
-            if character == oldCharacter then detachCharacter() end
-        end))
-        attachCharacter(LocalPlayer.Character)
         local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
         if playerGui then manager:WatchRoot(playerGui, "game") end
         table.insert(connections, LocalPlayer.ChildAdded:Connect(function(child)
@@ -880,12 +934,14 @@ return function(Library)
 
     function manager:Refresh(appearanceOnly)
         if not self.Alive then return end
-        if self.Options.Enabled and self.Options.AffectGame then startGame() end
+        if not appearanceOnly then textRules = {} end
+        if scopeEnabled(self.Options, "game") or scopeEnabled(self.PlayerOptions, "game") then startGame() end
         for node, record in pairs(appearanceOnly and imageNodes or watched) do apply(node, record) end
-        if characterMask then characterMask.Refresh() end
+        for player, record in pairs(activePlayers) do refreshCharacter(player, record) end
         for model, record in pairs(previewModels) do refreshPreview(model, record) end
         for panel in pairs(panels) do
             for key, control in pairs(panel.Controls) do control:Set(self.Options[key], true) end
+            for key, control in pairs(panel.PlayerControls) do control:Set(self.PlayerOptions[key], true) end
             panel.Method = self.Options.Method
             if panel.MethodControl then panel.MethodControl:Set(panel.Method, true) end
             if panel.EditCustom then panel.EditCustom:SetVisible(panel.Method == "custom") end
@@ -923,7 +979,28 @@ return function(Library)
         if self.Options.Method == "randomised" then startRandom() end
         if changed then self:Refresh(appearanceOnly) end
     end
-    function manager:Restore() self:SetOptions({ Enabled = false }) end
+    function manager:SetPlayerOptions(options)
+        assert(self.Alive and type(options) == "table", "player privacy options must be a table")
+        for key, value in pairs(options) do
+            if key == "Method" then
+                assert(value == "anonymous", "players currently support the anonymous method")
+            else
+                assert(self.PlayerOptions[key] ~= nil and type(value) == "boolean", "invalid player privacy option: " .. tostring(key))
+            end
+        end
+        local changed, appearanceOnly = false, true
+        for key, value in pairs(options) do
+            if self.PlayerOptions[key] ~= value then
+                self.PlayerOptions[key], changed = value, true
+                if key ~= "HideAvatar" then appearanceOnly = false end
+            end
+        end
+        if changed then self:Refresh(appearanceOnly) end
+    end
+    function manager:Restore()
+        self.Options.Enabled, self.PlayerOptions.Enabled = false, false
+        self:Refresh()
+    end
     function manager:SetLibrary(lib)
         assert(lib == Library, "PrivacyManager is bound to its creating library")
         return self
@@ -936,7 +1013,7 @@ return function(Library)
         local overlayBefore = {}
         for _, node in ipairs(window.Overlay:GetChildren()) do overlayBefore[node] = true end
         local section = tab:Section(opts.Title or "privacy", column or 1)
-        local panel = { Section = section, Instance = section.Frame, Controls = {}, Alive = true }
+        local panel = { Section = section, Instance = section.Frame, Controls = {}, PlayerControls = {}, Alive = true }
         local labels = opts.Labels or {}
         local function toggle(owner, key, fallback)
             local control = owner:Toggle({
@@ -1058,6 +1135,29 @@ return function(Library)
             or randomState == "ready" and "random identity ready"
             or randomState == "fallback" and "using anonymous identity"
             or "")
+        section:Divider()
+        local playerLabels = opts.PlayerLabels or {}
+        local function playerToggle(owner, key, fallback)
+            local control = owner:Toggle({
+                Text = playerLabels[key] or fallback, Flag = false, Default = self.PlayerOptions[key],
+                Callback = function(value) self:SetPlayerOptions({ [key] = value }) end,
+            })
+            panel.PlayerControls[key] = control
+            return control
+        end
+        playerToggle(section, "Enabled", "players identity"):Gear(function(content)
+            playerToggle(content, "HideUsername", "hide usernames")
+            playerToggle(content, "HideDisplayName", "hide display names")
+            playerToggle(content, "HideAvatar", "hide avatars")
+            playerToggle(content, "HideUserIds", "hide user ids")
+            content:Divider()
+            playerToggle(content, "AffectFacility", "affect facility")
+            playerToggle(content, "AffectGame", "affect game")
+        end, { MaxHeight = opts.GearMaxHeight or 220 })
+        panel.PlayerMethodControl = section:Dropdown({
+            Text = playerLabels.Method or "method", Flag = false, Options = { "anonymous" },
+            Default = "anonymous", Disabled = true,
+        })
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
         for i = repaintStart + 1, #Library.RepaintHooks do table.insert(hooks, Library.RepaintHooks[i]) end
@@ -1107,11 +1207,38 @@ return function(Library)
         return panel
     end
 
+    local function untrackPlayer(player)
+        local record = activePlayers[player]
+        if not record then return end
+        activePlayers[player], activeById[player.UserId] = nil, nil
+        detachCharacter(record)
+        for _, connection in ipairs(record.connections) do connection:Disconnect() end
+    end
+    local function trackPlayer(player)
+        if activePlayers[player] then return end
+        local previous = activeById[player.UserId]
+        if previous then untrackPlayer(previous) end
+        rememberIdentity(player)
+        local record = { connections = {} }
+        activePlayers[player], activeById[player.UserId] = record, player
+        local function changed()
+            rememberIdentity(player)
+            manager:Refresh()
+        end
+        table.insert(record.connections, player:GetPropertyChangedSignal("DisplayName"):Connect(changed))
+        table.insert(record.connections, player:GetPropertyChangedSignal("Name"):Connect(changed))
+        table.insert(record.connections, player.CharacterAdded:Connect(function(model) attachCharacter(player, record, model) end))
+        table.insert(record.connections, player.CharacterRemoving:Connect(function(model)
+            if record.model == model then detachCharacter(record) end
+        end))
+        attachCharacter(player, record, player.Character)
+    end
+
     function manager:Destroy()
         if not self.Alive then return end
         self.Alive = false
         for model in pairs(previewModels) do forgetPreview(model) end
-        detachCharacter()
+        for player in pairs(activePlayers) do untrackPlayer(player) end
         for node in pairs(watched) do forget(node, true) end
         for root, record in pairs(roots) do
             for _, connection in ipairs(record.connections) do connection:Disconnect() end
@@ -1127,13 +1254,20 @@ return function(Library)
         if Library.Addons.PrivacyManager == self then Library.Addons.PrivacyManager = nil end
     end
 
+    trackPlayer(LocalPlayer)
+    for _, player in ipairs(Players:GetPlayers()) do trackPlayer(player) end
     table.insert(connections, Players.PlayerAdded:Connect(function(player)
+        trackPlayer(player)
         if randomIdentity and player.UserId == randomIdentity.UserId then
             randomIdentity, pendingIdentity, randomState = nil, nil, "fallback"
-            if manager.Options.Method == "randomised" then manager:Refresh() end
         end
+        manager:Refresh()
+    end))
+    table.insert(connections, Players.PlayerRemoving:Connect(function(player)
+        -- Keep identity snapshots for old messages and a stable alias on rejoin.
+        untrackPlayer(player)
+        manager:Refresh()
     end))
     for root in pairs(Library.GuiRoots or {}) do manager:WatchRoot(root, "facility") end
-    table.insert(connections, LocalPlayer:GetPropertyChangedSignal("DisplayName"):Connect(function() manager:Refresh() end))
     return manager
 end

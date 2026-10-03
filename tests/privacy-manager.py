@@ -138,7 +138,7 @@ handle=node('Part',hat); handle.LocalTransparencyModifier=0
 sparkles=node('ParticleEmitter',handle); sparkles.Enabled=true
 tool=node('Tool',character); toolPart=node('Part',tool); toolPart.Color='tool color'
 serverPlayers={LocalPlayer}
-Players={LocalPlayer=LocalPlayer,PlayerAdded=signal()}
+Players={LocalPlayer=LocalPlayer,PlayerAdded=signal(),PlayerRemoving=signal()}
 function Players:GetPlayers() return serverPlayers end
 validAccounts={[456]={Username='AccountUser',DisplayName='Account Display'}}
 accountRequests={}; createdRigs={}
@@ -694,4 +694,137 @@ assert(Library.PrivacyManager==nil and #tasks==0 and #createdRigs==0)
 for _,rig in ipairs(createdRigs) do assert(rig.Parent==nil) end
 """)
 
-print("PASS: random discovery/cache/fallback/lifecycle, identity toggles, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")
+lua.execute(r"""
+-- Other players have independent options and session-stable anonymous assignments.
+local function makeRig(name,parent)
+ local model=node('Model',parent or workspace); model.Name=name
+ local humanoid=node('Humanoid',model); humanoid.RigType=Enum.HumanoidRigType.R15
+ local head=node('Part',model); head.Name='Head'; head.Color='original player skin'; head.CanCollide=true
+ local torso=node('Part',model); torso.Name='UpperTorso'; torso.Color='original player torso'
+ local shirt=node('Shirt',model); shirt.ShirtTemplate='original player shirt'
+ local hat=node('Accessory',model); local hair=node('Part',hat); hair.Name='Handle'
+ hair.LocalTransparencyModifier=0; hair.CanCollide=false
+ return model,head,hair,shirt
+end
+local function makePlayer(id,name,display)
+ local player=node('Player'); player.UserId=id; player.Name=name; player.DisplayName=display
+ local model,head,hair,shirt=makeRig(name)
+ player.Character=model
+ return player,head,hair,shirt
+end
+local function proxy(model) return model:FindFirstChild('FacilityAnonymousHead') end
+local alice,aliceHead,aliceHair,aliceShirt=makePlayer(1011,'Alice','Shared')
+local bob,bobHead,bobHair=makePlayer(1012,'Bob','Shared')
+serverPlayers={LocalPlayer,alice,bob}
+local p=factory(Library)
+local panel=p:BuildPrivacySection(tab,1,{GearMaxHeight=150})
+local second=p:BuildPrivacySection(tab,2)
+assert(panel.PlayerControls.Enabled.GearOptions.MaxHeight==150)
+assert(panel.PlayerMethodControl.Options.Disabled and panel.PlayerMethodControl:Get()=='anonymous')
+assert(not p.PlayerOptions.Enabled and not p.Options.Enabled)
+assert(p:GetAnonymousIdentity(alice).Name=='seized.cc/2' and p:GetAnonymousIdentity(bob).Name=='seized.cc/3')
+local text=label(facilityGui,'teleport to Alice | Bob | RealUser')
+local display=label(facilityGui,'Shared')
+local gameText=label(playerGui,'Alice and Bob')
+local billboard=node('BillboardGui',alice.Character); local nameTag=label(billboard,'Alice')
+local picture=node('ImageLabel',facilityGui); local thumb='rbxthumb://type=AvatarHeadShot&id=1011&w=150&h=150'
+picture.Image=thumb
+local gamePicture=node('ImageLabel',playerGui); gamePicture.Image=thumb
+local unknownPicture=node('ImageLabel',facilityGui); unknownPicture.Image='rbxthumb://type=AvatarHeadShot&id=999999&w=150&h=150'
+local input=node('TextBox',facilityGui,'Alice')
+local selectedPlayer=alice
+local button=node('TextButton',facilityGui,'Alice')
+local requestCount=#accountRequests
+panel.PlayerControls.Enabled:Set(true)
+assert(second.PlayerControls.Enabled.Value==true)
+assert(text.Text=='teleport to seized.cc/2 | seized.cc/3 | RealUser')
+assert(display.Text=='player') -- ambiguous shared display names get a generic replacement
+assert(gameText.Text=='Alice and Bob' and gamePicture.Image==thumb)
+assert(picture.Image=='' and picture:FindFirstChildOfClass('ViewportFrame'))
+assert(unknownPicture.Image:find('id=999999',1,true))
+assert(button.Text=='seized.cc/2' and selectedPlayer==alice and input.Text=='Alice')
+assert(p:GetIdentity(alice).UserId==0 and alice.UserId==1011 and alice.Name=='Alice')
+assert(p:GetName()=='RealUser' and p:GetAvatar(alice)=='rbxassetid://144080495')
+assert(not proxy(alice.Character) and not proxy(LocalPlayer.Character))
+assert(p:ResolveText('AliceX Alice 10110 1011')=='AliceX seized.cc/2 10110 0')
+assert(p:ResolveText('<font color="#1011">Alice</font>','facility',true)=='<font color="#1011">seized.cc/2</font>')
+assert(not pcall(function() p:SetPlayerOptions({Enabled=false,Method='custom'}) end))
+assert(p.PlayerOptions.Enabled)
+assert(not pcall(function() p:SetPlayerOptions({Bad=true}) end))
+p:SetOptions({Enabled=true}); assert(text.Text=='teleport to seized.cc/2 | seized.cc/3 | seized.cc/1')
+p:SetCustom({Name='Bob',DisplayName='LocalAlias'}); p:SetMethod('custom')
+assert(p:ResolveText('RealUser Bob')=='Bob seized.cc/3') -- replacements are not recursively reprocessed
+p:SetOptions({Enabled=false}); assert(p:GetName()=='RealUser' and p:GetName(bob)=='seized.cc/3')
+p:SetPlayerOptions({HideUsername=false,HideDisplayName=false,HideUserIds=false})
+assert(text.Text=='teleport to Alice | Bob | RealUser' and display.Text=='Shared')
+assert(p:GetName(alice)=='Alice' and p:GetUserId(alice)==1011)
+p:SetPlayerOptions({HideUsername=true,HideDisplayName=true,HideUserIds=true,AffectGame=true})
+assert(gameText.Text=='seized.cc/2 and seized.cc/3' and nameTag.Text=='seized.cc/2')
+assert(gamePicture.Image=='' and proxy(alice.Character) and proxy(bob.Character))
+assert(aliceHead.Transparency==1 and aliceHair.LocalTransparencyModifier==1 and aliceShirt.ShirtTemplate=='')
+assert(aliceHead.CanCollide==true and not proxy(LocalPlayer.Character))
+-- Preview ownership follows current players and restores on owner/scope changes.
+local viewport=node('ViewportFrame',playerGui)
+local aliceCopy,copyHead,copyHair=makeRig('AnonymousPreview',viewport); aliceCopy:SetAttribute('UserId',1011)
+assert(proxy(aliceCopy) and copyHead.Transparency==1 and copyHair.Transparency==1)
+aliceCopy:SetAttribute('UserId',LocalPlayer.UserId)
+assert(not proxy(aliceCopy) and copyHead.Transparency==0)
+aliceCopy:SetAttribute('UserId',1011); assert(proxy(aliceCopy))
+local unknown,unknownHead=makeRig('Shared',viewport); assert(not proxy(unknown))
+local unregister=p:RegisterPreview(unknown,bob); assert(proxy(unknown))
+unregister(); assert(not proxy(unknown) and unknownHead.Transparency==0)
+local byName=makeRig('Bob',viewport); assert(proxy(byName))
+local byId=makeRig('1012',viewport); assert(proxy(byId))
+-- No account requests; hide-avatar alone skips text work and restores geometry/images.
+local resolve,resolveCount=p.ResolveText,0
+p.ResolveText=function(self,...) resolveCount=resolveCount+1; return resolve(self,...) end
+p:SetPlayerOptions({HideAvatar=false})
+assert(resolveCount==0 and not proxy(alice.Character) and not proxy(aliceCopy))
+assert(aliceHair.LocalTransparencyModifier==0 and aliceShirt.ShirtTemplate=='original player shirt')
+assert(picture.Image==thumb and gameText.Text=='seized.cc/2 and seized.cc/3')
+p.ResolveText=resolve
+p:SetPlayerOptions({HideAvatar=true,AffectFacility=false})
+assert(text.Text=='teleport to Alice | Bob | RealUser' and picture.Image==thumb)
+assert(gameText.Text=='seized.cc/2 and seized.cc/3' and proxy(alice.Character))
+p:SetPlayerOptions({AffectFacility=true})
+alice.DisplayName='Alice Display'
+local changed=label(playerGui,'Alice Display'); assert(changed.Text=='seized.cc/2')
+local charlie,charlieHead=makePlayer(1013,'Charlie','Charlie Display')
+serverPlayers={LocalPlayer,alice,bob,charlie}; Players.PlayerAdded:Fire(charlie)
+assert(p:GetName(charlie)=='seized.cc/4' and proxy(charlie.Character))
+local charlieLabel=label(facilityGui,'Charlie'); assert(charlieLabel.Text=='seized.cc/4')
+-- Leave restores the old character and previews, while historical text retains its alias.
+Players.PlayerRemoving:Fire(alice); serverPlayers={LocalPlayer,bob,charlie}
+assert(not proxy(alice.Character) and aliceHead.Transparency==0 and aliceHair.LocalTransparencyModifier==0)
+assert(not proxy(aliceCopy) and copyHair.Transparency==0)
+assert(p:ResolveText('Alice')=='seized.cc/2')
+local oldCharacter=alice.Character
+local aliceAgain,newHead,newHair=makePlayer(1011,'Alice','Alice Display')
+serverPlayers={LocalPlayer,bob,charlie,aliceAgain}; Players.PlayerAdded:Fire(aliceAgain)
+assert(p:GetName(aliceAgain)=='seized.cc/2' and proxy(aliceAgain.Character) and proxy(aliceCopy))
+assert(not proxy(oldCharacter))
+local previous=aliceAgain.Character
+aliceAgain.CharacterRemoving:Fire(previous)
+assert(not proxy(previous) and newHair.LocalTransparencyModifier==0)
+local replacement,replacementHead,replacementHair=makeRig('Alice')
+aliceAgain.Character=replacement; aliceAgain.CharacterAdded:Fire(replacement)
+assert(proxy(replacement) and replacementHair.LocalTransparencyModifier==1)
+assert(not proxy(previous) and aliceAgain.UserId==1011 and aliceAgain.Character==replacement)
+p:SetAnonymous({Prefix='player '}); assert(p:GetName(aliceAgain)=='player 2' and p:GetName(charlie)=='player 4')
+p:Restore()
+assert(not p.Options.Enabled and not p.PlayerOptions.Enabled)
+assert(text.Text=='teleport to Alice | Bob | RealUser' and gameText.Text=='Alice and Bob')
+assert(not proxy(replacement) and not proxy(bob.Character) and picture.Image==thumb)
+p:SetPlayerOptions({Enabled=true}); assert(p:GetName(aliceAgain)=='player 2')
+p:Destroy()
+assert(not proxy(replacement) and not proxy(bob.Character) and not proxy(charlie.Character))
+assert(not proxy(aliceCopy) and not proxy(byName) and not proxy(byId))
+assert(gameText.Text=='Alice and Bob' and picture.Image==thumb)
+assert(replacementHead.Color=='original player skin' and replacementHair.LocalTransparencyModifier==0)
+assert(#accountRequests==requestCount)
+assert(aliceAgain.Name=='Alice' and aliceAgain.Character==replacement and selectedPlayer==alice)
+local later=makeRig('Alice'); aliceAgain.CharacterAdded:Fire(later); assert(not proxy(later))
+serverPlayers={LocalPlayer}
+""")
+
+print("PASS: per-player anonymous mapping/scopes/joins/rejoins/previews/restoration, random discovery/cache/fallback/lifecycle, identity toggles, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")
