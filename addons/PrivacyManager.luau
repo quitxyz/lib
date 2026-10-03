@@ -53,6 +53,61 @@ return function(Library)
         return false
     end
 
+    -- TEMPORARY: remove this diagnostic after the accessory test.
+    local diagnosticUsers = { beastskaterv8 = true, gxlaxyeu = true }
+    local diagnosticAccounts, diagnosticRendered = {}, {}
+    local function reportAccessories(id, rig, stage, model, followed, character)
+        if not diagnosticAccounts[id] then return end
+        local ok, err = pcall(function()
+            local prefix = ("[privacy accessory test] account=%s rig=%s stage=%s ")
+                :format(("%.0f"):format(id), tostring(rig), stage)
+            local head = model:FindFirstChild("Head")
+            print(prefix .. "head=" .. (head and head.ClassName or "missing")
+                .. " size=" .. tostring(head and head.Size)
+                .. " transparency=" .. tostring(head and head.Transparency))
+            local count = 0
+            for _, accessory in ipairs(model:GetChildren()) do
+                if accessory:IsA("Accessory") then
+                    count = count + 1
+                    local handle = accessory:FindFirstChild("Handle")
+                    if not handle or not handle:IsA("BasePart") then
+                        print(prefix .. "accessory=" .. accessory.Name .. " handle=missing")
+                    else
+                        local mesh = handle:FindFirstChildOfClass("SpecialMesh")
+                        local weld = handle:FindFirstChild("AccessoryWeld")
+                        local anchor = weld and weld.Part1
+                        local attachments = {}
+                        for _, child in ipairs(handle:GetChildren()) do
+                            if child:IsA("Attachment") then
+                                table.insert(attachments, child.Name .. "@" .. tostring(child.Position))
+                            end
+                        end
+                        local follow
+                        for _, record in ipairs(followed or {}) do
+                            if record.part == handle then follow = record; break end
+                        end
+                        local target = follow and character:FindFirstChild(follow.name)
+                        print(prefix .. "accessory=" .. accessory.Name
+                            .. " size=" .. tostring(handle.Size)
+                            .. " transparency=" .. tostring(handle.Transparency)
+                            .. " localTransparency=" .. tostring(handle.LocalTransparencyModifier)
+                            .. " mesh=" .. tostring(mesh and mesh.MeshId or handle:IsA("MeshPart") and handle.MeshId)
+                            .. " meshScale=" .. tostring(mesh and mesh.Scale)
+                            .. " weldTarget=" .. (anchor and anchor.Name or "missing")
+                            .. " attachments=" .. table.concat(attachments, ",")
+                            .. " followTarget=" .. (follow and follow.name or "unregistered")
+                            .. " targetExists=" .. tostring(target ~= nil)
+                            .. " offset=" .. tostring(follow and follow.offset
+                                or anchor and anchor:IsA("BasePart") and anchor.CFrame:ToObjectSpace(handle.CFrame))
+                            .. " position=" .. tostring(handle.Position))
+                    end
+                end
+            end
+            print(prefix .. "accessoryCount=" .. count)
+        end)
+        if not ok then warn("[privacy accessory test] diagnostic failed: " .. tostring(err)) end
+    end
+
     -- Loading returns draft data; it does not activate privacy or replace the current identity.
     function manager:LoadAccount(account)
         assert(self.Alive, "PrivacyManager is destroyed")
@@ -68,6 +123,7 @@ return function(Library)
             local info = game:GetService("UserService"):GetUserInfosByUserIdsAsync({ id })[1]
             assert(self.Alive, "PrivacyManager was destroyed while loading")
             assert(info and info.Username and info.DisplayName, "account details unavailable")
+            diagnosticAccounts[id] = diagnosticUsers[info.Username:lower()] == true
             if not accounts[id] then
                 local description = Players:GetHumanoidDescriptionFromUserIdAsync(id)
                 table.insert(temporary, description)
@@ -78,6 +134,7 @@ return function(Library)
                     table.insert(temporary, rig)
                     assert(self.Alive, "PrivacyManager was destroyed while loading")
                     rigs[kind] = rig
+                    reportAccessories(id, kind, "generated", rig)
                 end
                 assert(self.Alive, "PrivacyManager was destroyed while loading")
                 accounts[id] = rigs
@@ -591,6 +648,10 @@ return function(Library)
                     end
                 end
                 syncHeads()
+                if not isPreview and diagnosticAccounts[identity.AccountId] and not diagnosticRendered[key] and accountVisual then
+                    diagnosticRendered[key] = true
+                    reportAccessories(identity.AccountId, kind, "displayed", accountVisual, accountParts, character)
+                end
                 return
             end
             clearAccountVisual()
