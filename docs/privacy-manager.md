@@ -21,7 +21,7 @@ The section contains **user identity**, with a gear for:
 - affect facility
 - affect game
 
-Defaults: identity masking off, both name fields, avatar masking, and user ID masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing any gear option refreshes affected text automatically.
+Defaults: identity masking off, both name fields, avatar masking, and user ID masking selected, Facility selected, game UI off. Controls are unflagged and session-only in this version. Turning the master toggle off restores text. Changing gear options refreshes affected visuals automatically; avatar-only changes skip name text.
 
 Alternatively:
 
@@ -56,7 +56,7 @@ PrivacyManager:Restore() -- disable masking and restore text
 PrivacyManager:Destroy() -- restore, disconnect, remove owned panels
 ```
 
-The local anonymous replacement defaults to `seized.cc/1`. SetAnonymous can change the prefix (for example `player ` produces `player 1`). GetIdentity returns a new table containing Name, DisplayName, Badge, and a display UserId (0 when local ID masking is enabled). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
+The local anonymous replacement defaults to `seized.cc/1`. SetAnonymous can change the prefix (for example `player ` produces `player 1`). GetIdentity returns a new table containing Name, DisplayName, and a display UserId (0 for anonymous ID masking, or the selected account/custom ID). Name getters reflect field toggles and the master switch; ResolveText additionally respects the requested scope (facility/game). Other players are unchanged in this first version. Never use a masked name as a gameplay identifier.
 
 SetLibrary(Library) is accepted for consistency; a loaded manager belongs to its creating library and cannot be moved to another instance. Library:LoadAddon caches it. Destroy releases that cached instance so it may be loaded again.
 
@@ -93,7 +93,7 @@ PrivacyManager:BuildPrivacySection(settingsTab, 1, {
 })
 ```
 
-BuildPrivacyTab also accepts Title and Icon. Other players, server information, account-backed/random identities and a general adapter registry are later steps. Explicit preview registration is available below.
+BuildPrivacyTab also accepts Title and Icon. Other players, server information and a general adapter registry are later steps. Custom and randomised local identities are available. Explicit preview registration is available below.
 
 ## Avatar thumbnails
 
@@ -111,7 +111,7 @@ The anonymous appearance uses white body colors, clears ordinary MeshPart/Specia
 
 Original visual property values are tracked per instance. External updates become the latest originals while masking is active. Turning off identity privacy, hide avatar, or affect game restores those values; unload does the same and disconnects listeners. The manager follows CharacterAdded/CharacterRemoving, restores the old character, and watches new descendants on each respawn. Facility-only privacy does not mask the character.
 
-This is a neutral visual treatment, not a complete generic avatar replacement. Body silhouettes remain recognizable. SurfaceAppearance/PBR textures, custom character renderers, and unidentifiable ViewportFrame models may retain visual details. Recognized previews are covered as described below. Chosen custom appearances and random identity appearances are later work. R15 rigs keep their current geometry; this does not convert them to R6. Changes are made on the local client and do not change what other players see.
+This is a neutral visual treatment, not a complete generic avatar replacement. Body silhouettes remain recognizable. SurfaceAppearance/PBR textures, custom character renderers, and unidentifiable ViewportFrame models may retain visual details. Recognized previews are covered as described below. Loaded custom and randomised account appearances use the separate visual model described below. R15 rigs keep their current geometry; this does not convert them to R6. Changes are made on the local client and do not change what other players see.
 
 ## Gear height
 
@@ -223,3 +223,29 @@ Matching R6/R15 body parts are required. Custom rigs, unusual accessory attachme
 Badge controls are deferred. The custom editor shows two disabled selectors: **status icon · left** and **verification · right**, both set to **default**. The choices are layout placeholders; native placement will be verified before implementation. Applying an identity does not change native badge icons, add name suffixes or fetch account badge metadata. Existing left-side status icons and right-side verification remain untouched. There is no badge override API at this stage.
 
 Avatar-only toggle changes refresh tracked images, live character visuals and recognised previews without reprocessing name text. Other identity or scope changes still refresh the relevant visual records.
+
+## Randomised local identity
+
+Select **randomised** in the method dropdown. The first selection starts one background discovery task, even if user identity is currently disabled. It samples candidate IDs in the inclusive range **120000000–11000000000**, with up to five draws. This is an approximate account-age range, not a creation-date or recent-activity check. No curated account list or per-frame network lookup is used.
+
+The previous replacement stays in effect while loading (anonymous on a fresh manager). An accepted account supplies its username, display name, user ID and appearance through the existing loader. Custom identity settings remain separate. Current real server-player IDs, including LocalPlayer.UserId, and repeated candidates are rejected before lookup. Membership is checked again after loading. Failed lookups or appearance loads advance to the next candidate, with a 0.25-second delay between draws. A busy custom account loader is allowed to finish first.
+
+A successful identity and its appearance templates remain cached for the lifetime of the loaded manager. Turning privacy off or switching methods does not reroll it. Switching away during loading allows the result to finish caching without changing the selected method. Failed discovery uses the current anonymous identity and does not automatically retry on toggles. Unloading destroys the cache; a newly created manager begins a new session. If the real owner of the selected random account subsequently joins the server, the random identity falls back to anonymous to avoid displaying another present player's identity.
+
+The section shows a lowercase loading, ready or anonymous-fallback status when randomised is selected. Individual hide toggles and Facility/game scopes still apply, including to thumbnails, live character visuals and recognised preview rigs. Other players remain unchanged. Badge controls stay disabled.
+
+Optional configuration must be set **before the first randomised selection**:
+
+```lua
+PrivacyManager:SetRandomOptions({
+    MinUserId = 120000000,
+    MaxUserId = 11000000000,
+    Attempts = 5,
+})
+PrivacyManager:SetMethod("randomised")
+PrivacyManager:SetOptions({ Enabled = true })
+
+local status = PrivacyManager:GetRandomStatus() -- idle, loading, ready, fallback
+```
+
+IDs must be positive safe integers with MinUserId <= MaxUserId. Attempts accepts 1–20 and counts candidate draws, including excluded or repeated IDs. The defaults require no template changes. Background loading may take several seconds; building or applying the appearance still has a local rendering cost. Runtime network and mobile timing must be checked in Roblox.

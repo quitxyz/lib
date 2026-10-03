@@ -22,6 +22,36 @@ return function(Library)
     local editorRoots = {}
     local accounts = {}
     local loadingAccount = false
+    local randomOptions = { MinUserId = 120000000, MaxUserId = 11000000000, Attempts = 5 }
+    local randomGenerator = Random.new()
+    local randomIdentity, pendingIdentity
+    local randomState = "idle"
+
+    function manager:SetRandomOptions(options)
+        assert(self.Alive and type(options) == "table", "random options must be a table")
+        assert(randomState == "idle", "set random options before selecting randomised")
+        local nextOptions = {}
+        for key, value in pairs(randomOptions) do nextOptions[key] = value end
+        for key, value in pairs(options) do
+            assert(nextOptions[key] ~= nil, "unknown random option: " .. tostring(key))
+            assert(type(value) == "number" and value >= 1 and value <= 9007199254740991
+                and value == math.floor(value), key .. " must be a positive whole number")
+            nextOptions[key] = value
+        end
+        assert(nextOptions.MinUserId <= nextOptions.MaxUserId, "minimum user id exceeds maximum")
+        assert(nextOptions.Attempts <= 20, "Attempts must be between 1 and 20")
+        randomOptions = nextOptions
+    end
+
+    function manager:GetRandomStatus() return randomState end
+
+    local function isServerIdentity(id)
+        if id == LocalPlayer.UserId then return true end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.UserId == id then return true end
+        end
+        return false
+    end
 
     -- Loading returns draft data; it does not activate privacy or replace the current identity.
     function manager:LoadAccount(account)
@@ -36,14 +66,17 @@ return function(Library)
                 or Players:GetUserIdFromNameAsync(query:gsub("^@", ""))
             assert(id and id > 0 and id <= 9007199254740991 and id == math.floor(id), "invalid user id")
             local info = game:GetService("UserService"):GetUserInfosByUserIdsAsync({ id })[1]
+            assert(self.Alive, "PrivacyManager was destroyed while loading")
             assert(info and info.Username and info.DisplayName, "account details unavailable")
             if not accounts[id] then
                 local description = Players:GetHumanoidDescriptionFromUserIdAsync(id)
                 table.insert(temporary, description)
+                assert(self.Alive, "PrivacyManager was destroyed while loading")
                 local rigs = {}
                 for _, kind in ipairs({ Enum.HumanoidRigType.R6, Enum.HumanoidRigType.R15 }) do
                     local rig = Players:CreateHumanoidModelFromDescriptionAsync(description, kind)
                     table.insert(temporary, rig)
+                    assert(self.Alive, "PrivacyManager was destroyed while loading")
                     rigs[kind] = rig
                 end
                 assert(self.Alive, "PrivacyManager was destroyed while loading")
@@ -61,8 +94,48 @@ return function(Library)
     end
     local function replacementIdentity()
         if manager.Options.Method == "custom" then return custom end
+        if manager.Options.Method == "randomised" then
+            if randomIdentity then return randomIdentity end
+            if randomState == "loading" and pendingIdentity then return pendingIdentity end
+        end
         return { Name = anonymousName, DisplayName = anonymousName, UserId = 0, Appearance = "anonymous" }
     end
+    local function startRandom()
+        if randomState ~= "idle" then return end
+        randomState = "loading"
+        task.defer(function()
+            local attempted = {}
+            for attempt = 1, randomOptions.Attempts do
+                -- A custom account lookup shares the loader; wait without consuming attempts.
+                while manager.Alive and loadingAccount do task.wait(0.1) end
+                if not manager.Alive then return end
+                local span = randomOptions.MaxUserId - randomOptions.MinUserId + 1
+                -- Scale a fractional draw: the default IDs exceed 32-bit integer bounds.
+                local id = math.min(randomOptions.MaxUserId,
+                    randomOptions.MinUserId + math.floor(randomGenerator:NextNumber() * span))
+                if not attempted[id] and not isServerIdentity(id) then
+                    attempted[id] = true
+                    local wasCached = accounts[id] ~= nil
+                    local ok, identity = pcall(manager.LoadAccount, manager, ("%.0f"):format(id))
+                    if not manager.Alive then return end
+                    -- A player may have joined while the account/appearance request yielded.
+                    if ok and not isServerIdentity(id) then
+                        randomIdentity = identity
+                        break
+                    elseif not wasCached and accounts[id] and custom.AccountId ~= id then
+                        for _, rig in pairs(accounts[id]) do rig:Destroy() end
+                        accounts[id] = nil
+                    end
+                end
+                if attempt < randomOptions.Attempts then task.wait(0.25) end
+            end
+            if not manager.Alive then return end
+            randomState = randomIdentity and "ready" or "fallback"
+            pendingIdentity = nil
+            if manager.Options.Method == "randomised" then manager:Refresh() end
+        end)
+    end
+
     local function hideAppearance()
         return manager.Options.HideAvatar and replacementIdentity().Appearance ~= "keep mine"
     end
@@ -208,8 +281,9 @@ return function(Library)
         local kind = (params.type or ""):lower()
         if tonumber(params.id) == LocalPlayer.UserId
             and (kind == "avatarheadshot" or kind == "avatarbust" or kind == "avatar") then
-            if self.Options.Method == "custom" and custom.Appearance == "loaded account" then
-                return value:gsub("([&?/]id=)%d+", function(prefix) return prefix .. ("%.0f"):format(custom.AccountId) end)
+            local identity = replacementIdentity()
+            if identity.Appearance == "loaded account" then
+                return value:gsub("([&?/]id=)%d+", function(prefix) return prefix .. ("%.0f"):format(identity.AccountId) end)
             end
             return anonymousAvatar
         end
@@ -219,8 +293,9 @@ return function(Library)
     function manager:GetAvatar(player)
         player = player or LocalPlayer
         if self.Alive and self.Options.Enabled and hideAppearance() and player == LocalPlayer then
-            if self.Options.Method == "custom" and custom.Appearance == "loaded account" then
-                return "rbxthumb://type=AvatarHeadShot&id=" .. custom.AccountId .. "&w=150&h=150"
+            local identity = replacementIdentity()
+            if identity.Appearance == "loaded account" then
+                return "rbxthumb://type=AvatarHeadShot&id=" .. ("%.0f"):format(identity.AccountId) .. "&w=150&h=150"
             end
             return anonymousAvatar
         end
@@ -425,7 +500,7 @@ return function(Library)
             accountVisual, accountKey, accountParts = nil, nil, nil
         end
         local function loadedAppearance()
-            return manager.Options.Method == "custom" and custom.Appearance == "loaded account"
+            return replacementIdentity().Appearance == "loaded account"
         end
 
         local function clearFaces()
@@ -477,8 +552,9 @@ return function(Library)
                 end
                 local humanoid = character:FindFirstChildOfClass("Humanoid")
                 local kind = humanoid and humanoid.RigType or Enum.HumanoidRigType.R6
-                local template = accounts[custom.AccountId] and accounts[custom.AccountId][kind]
-                local key = tostring(custom.AccountId) .. tostring(kind)
+                local identity = replacementIdentity()
+                local template = accounts[identity.AccountId] and accounts[identity.AccountId][kind]
+                local key = tostring(identity.AccountId) .. tostring(kind)
                 if accountKey ~= key then clearAccountVisual() end
                 if template and not accountVisual then
                     accountVisual = template:Clone()
@@ -790,17 +866,28 @@ return function(Library)
             panel.Method = self.Options.Method
             if panel.MethodControl then panel.MethodControl:Set(panel.Method, true) end
             if panel.EditCustom then panel.EditCustom:SetVisible(panel.Method == "custom") end
+            if panel.RandomStatus then
+                panel.RandomStatus:Set(panel.Method ~= "randomised" and ""
+                    or randomState == "loading" and "loading random identity…"
+                    or randomState == "ready" and "random identity ready"
+                    or randomState == "fallback" and "using anonymous identity"
+                    or "")
+            end
         end
     end
 
     function manager:SetOptions(options)
-        assert(type(options) == "table", "privacy options must be a table")
+        assert(self.Alive and type(options) == "table", "privacy options must be a table")
         for key, value in pairs(options) do
             if key == "Method" then
-                assert(value == "anonymous" or value == "custom", "method must be anonymous or custom")
+                assert(value == "anonymous" or value == "custom" or value == "randomised",
+                    "method must be anonymous, custom or randomised")
             else
                 assert(self.Options[key] ~= nil and type(value) == "boolean", "invalid privacy option: " .. tostring(key))
             end
+        end
+        if options.Method == "randomised" and randomState == "idle" then
+            pendingIdentity = replacementIdentity()
         end
         local changed, appearanceOnly = false, true
         for key, value in pairs(options) do
@@ -810,6 +897,7 @@ return function(Library)
                 self.Options[key] = value
             end
         end
+        if self.Options.Method == "randomised" then startRandom() end
         if changed then self:Refresh(appearanceOnly) end
     end
     function manager:Restore() self:SetOptions({ Enabled = false }) end
@@ -929,7 +1017,7 @@ return function(Library)
             toggle(content, "AffectGame", "affect game")
         end, { MaxHeight = opts.GearMaxHeight or 220 })
         panel.MethodControl = section:Dropdown({
-            Text = "method", Flag = false, Options = { "anonymous", "custom" }, Default = self.Options.Method,
+            Text = "method", Flag = false, Options = { "anonymous", "custom", "randomised" }, Default = self.Options.Method,
             Callback = function(value)
                 self:SetMethod(value)
                 panel.Method = value
@@ -942,6 +1030,11 @@ return function(Library)
         })
         editButton:SetVisible(self.Options.Method == "custom")
         panel.EditCustom = editButton
+        panel.RandomStatus = section:Label(self.Options.Method ~= "randomised" and ""
+            or randomState == "loading" and "loading random identity…"
+            or randomState == "ready" and "random identity ready"
+            or randomState == "fallback" and "using anonymous identity"
+            or "")
         local ownedConnections, hooks, floating = {}, {}, {}
         for i = connectionStart + 1, #Library.Connections do table.insert(ownedConnections, Library.Connections[i]) end
         for i = repaintStart + 1, #Library.RepaintHooks do table.insert(hooks, Library.RepaintHooks[i]) end
@@ -1011,6 +1104,12 @@ return function(Library)
         if Library.Addons.PrivacyManager == self then Library.Addons.PrivacyManager = nil end
     end
 
+    table.insert(connections, Players.PlayerAdded:Connect(function(player)
+        if randomIdentity and player.UserId == randomIdentity.UserId then
+            randomIdentity, pendingIdentity, randomState = nil, nil, "fallback"
+            if manager.Options.Method == "randomised" then manager:Refresh() end
+        end
+    end))
     for root in pairs(Library.GuiRoots or {}) do manager:WatchRoot(root, "facility") end
     table.insert(connections, LocalPlayer:GetPropertyChangedSignal("DisplayName"):Connect(function() manager:Refresh() end))
     return manager

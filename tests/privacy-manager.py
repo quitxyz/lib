@@ -4,6 +4,24 @@ from lupa.lua54 import LuaRuntime
 root=Path(__file__).resolve().parents[1]
 lua=LuaRuntime()
 lua.execute(r"""
+randomDraws={}; randomDrawCount=0
+Random={new=function() return {NextNumber=function()
+ randomDrawCount=randomDrawCount+1
+ return table.remove(randomDraws,1) or 0
+end} end}
+tasks={}
+task={defer=function(f) tasks[#tasks+1]=coroutine.create(f) end,wait=function() coroutine.yield() end}
+function stepTasks()
+ local pending=tasks; tasks={}
+ for _,co in ipairs(pending) do
+  local ok,err=coroutine.resume(co); assert(ok,err)
+  if coroutine.status(co)~='dead' then tasks[#tasks+1]=co end
+ end
+end
+function drainTasks()
+ for i=1,30 do if #tasks==0 then return end; stepTasks() end
+ error('task did not finish')
+end
 Vector2={zero="zero vector"}
 Enum={HumanoidRigType={R6="R6",R15="R15"},HumanoidDisplayDistanceType={None="None"},NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
 Vector3={new=function(x,y,z) return {X=x,Y=y,Z=z} end,zero={X=0,Y=0,Z=0}}
@@ -95,11 +113,16 @@ hat=node('Accessory',character)
 handle=node('Part',hat); handle.LocalTransparencyModifier=0
 sparkles=node('ParticleEmitter',handle); sparkles.Enabled=true
 tool=node('Tool',character); toolPart=node('Part',tool); toolPart.Color='tool color'
-Players={LocalPlayer=LocalPlayer}
+serverPlayers={LocalPlayer}
+Players={LocalPlayer=LocalPlayer,PlayerAdded=signal()}
+function Players:GetPlayers() return serverPlayers end
+validAccounts={[456]={Username='AccountUser',DisplayName='Account Display'}}
+accountRequests={}; createdRigs={}
+
 function Players:GetUserIdFromNameAsync(name) assert(name=='AccountUser','not found'); return 456 end
-function Players:GetHumanoidDescriptionFromUserIdAsync(id) assert(id==456); return node('HumanoidDescription') end
+function Players:GetHumanoidDescriptionFromUserIdAsync(id) assert(validAccounts[id]); if appearanceFailure then error('appearance unavailable') end; return node('HumanoidDescription') end
 function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
- local model=node('Model'); local h=node('Humanoid',model); h.RigType=kind
+ local model=node('Model'); createdRigs[#createdRigs+1]=model; local h=node('Humanoid',model); h.RigType=kind
  local head=node('Part',model); head.Name='Head'; head.Color='loaded skin'
  local torso=node('Part',model); torso.Name='Torso'; torso.Color='loaded skin'
  local shirt=node('Shirt',model); shirt.ShirtTemplate='loaded shirt'
@@ -107,7 +130,9 @@ function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
  return model
 end
 UserService={GetUserInfosByUserIdsAsync=function(_,ids)
- assert(ids[1]==456,'not found'); return {{Username='AccountUser',DisplayName='Account Display'}}
+ accountRequests[#accountRequests+1]=ids[1]
+ if yieldLookup then task.wait() end
+ assert(validAccounts[ids[1]],'not found'); return {validAccounts[ids[1]]}
 end}
 RunService={RenderStepped=signal()}
 game={GetService=function(_,name)
@@ -421,6 +446,17 @@ p:Restore(); assert(loadedVisual.Parent==nil and avatar.Image==bust)
 p:SetOptions({Enabled=true}); assert(LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance'))
 p:SetCustom({Appearance='keep mine'}); assert(not LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance'))
 p:SetMethod('anonymous'); assert(ownFace(newBody))
+-- Random identities use the same reversible, isolated appearance path.
+p:SetRandomOptions({MinUserId=456,MaxUserId=456})
+p:SetMethod('randomised'); assert(p:GetRandomStatus()=='loading' and ownFace(newBody))
+drainTasks()
+assert(p:GetRandomStatus()=='ready' and p:GetName()=='AccountUser')
+assert(avatar.Image:find('id=456',1,true) and not ownFace(newBody))
+local randomVisual=LocalPlayer.Character.Parent:FindFirstChild('FacilityCustomAppearance')
+assert(randomVisual and not randomVisual:IsDescendantOf(LocalPlayer.Character))
+assert(randomVisual:FindFirstChildOfClass('Humanoid').EvaluateStateMachine==false)
+assert(randomVisual:FindFirstChild('Head').CanCollide==false)
+p:SetMethod('anonymous'); assert(ownFace(newBody) and randomVisual.Parent==nil)
 -- Existing/open, newly created, late-owned and explicitly registered previews.
 local viewport=node('ViewportFrame',playerGui)
 local camera=node('Camera',viewport); viewport.CurrentCamera=camera
@@ -500,4 +536,108 @@ gameLabel.Text='RealUser again'; assert(gameLabel.Text=='RealUser again')
 assert(not pcall(function() factory(Library):SetOptions({NotAnOption=true}) end))
 Library.PrivacyManager:Destroy()
 """)
-print("PASS: identity toggles, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")
+lua.execute(r"""
+-- Default bounds include IDs above 32 bits. Invalid candidates retry asynchronously.
+local p=factory(Library)
+local panel=p:BuildPrivacySection(tab)
+assert(table.find(panel.MethodControl.Options.Options,'randomised'))
+assert(p:GetRandomStatus()=='idle')
+for _,options in ipairs({{Attempts=0},{Attempts=21},{MinUserId=0},{MaxUserId=0/0},{MinUserId=200,MaxUserId=100},{Other=1}}) do
+ assert(not pcall(function() p:SetRandomOptions(options) end))
+end
+validAccounts[11000000000]={Username='RandomUser',DisplayName='Random Display'}
+randomDraws={0,1}; accountRequests={}
+p:SetCustom({Name='Pending',DisplayName='Pending Display',Appearance='keep mine'})
+p:SetOptions({Enabled=true,Method='custom'})
+p:SetMethod('randomised')
+assert(p:GetRandomStatus()=='loading' and p:GetName()=='Pending')
+assert(panel.RandomStatus.Value=='loading random identity…' and #accountRequests==0)
+p:SetMethod('anonymous'); p:SetMethod('randomised')
+assert(#tasks==1) -- no duplicate work when switching methods mid-load
+stepTasks(); assert(accountRequests[1]==120000000 and p:GetRandomStatus()=='loading')
+drainTasks()
+assert(accountRequests[2]==11000000000 and #accountRequests==2)
+assert(p:GetRandomStatus()=='ready' and p:GetUserId()==11000000000)
+assert(p:GetName()=='RandomUser' and p:GetCustom().Name=='Pending')
+assert(panel.RandomStatus.Value=='random identity ready')
+assert(p:GetAvatar():find('id=11000000000',1,true))
+assert(p:ResolveImage('rbxthumb://type=AvatarHeadShot&id=123&w=150&h=150','facility'):find('id=11000000000',1,true))
+p:SetOptions({HideUsername=false,HideDisplayName=false,HideUserIds=false,HideAvatar=false})
+assert(p:GetName()=='RealUser' and p:GetUserId()==123 and p:GetAvatar():find('id=123',1,true))
+p:SetOptions({HideUsername=true,HideDisplayName=true,HideUserIds=true,HideAvatar=true})
+p:Restore(); p:SetOptions({Enabled=true}); p:SetMethod('custom'); p:SetMethod('randomised')
+assert(#tasks==0 and #accountRequests==2 and p:GetName()=='RandomUser')
+assert(not pcall(function() p:SetRandomOptions({Attempts=1}) end))
+-- A newly joined real owner must never share the replacement identity.
+local joined=node('Player'); joined.UserId=11000000000; joined.Name='RandomUser'; joined.DisplayName='Random Display'
+serverPlayers={LocalPlayer,joined}; Players.PlayerAdded:Fire(joined)
+assert(p:GetRandomStatus()=='fallback' and p:GetName()=='seized.cc/1')
+assert(p:GetName(joined)=='RandomUser')
+p:SetMethod('anonymous'); p:SetMethod('randomised'); assert(#tasks==0)
+p:Destroy(); serverPlayers={LocalPlayer}
+
+-- Reject local/current server IDs without issuing account requests, then accept a unique one.
+p=factory(Library)
+local other=node('Player'); other.UserId=124; other.Name='Other'; other.DisplayName='Other'
+serverPlayers={LocalPlayer,other}
+p:SetRandomOptions({MinUserId=123,MaxUserId=456,Attempts=4})
+randomDraws={0,1.5/334,2.5/334,1}; accountRequests={}
+p:SetOptions({Enabled=true,Method='randomised'}); drainTasks()
+assert(#accountRequests==2 and accountRequests[1]==125 and accountRequests[2]==456)
+assert(p:GetUserId()==456 and p:GetIdentity(other).UserId==124)
+p:Destroy(); serverPlayers={LocalPlayer}
+
+-- Bounded failure uses anonymous and does not restart when toggling or changing method.
+p=factory(Library); accountRequests={}; randomDraws={0,0.25,0.5,0.75,1}
+p:SetRandomOptions({MinUserId=900,MaxUserId=904})
+p:SetOptions({Enabled=true,Method='randomised'}); drainTasks()
+assert(#accountRequests==5 and p:GetRandomStatus()=='fallback' and p:GetName()=='seized.cc/1')
+p:SetAnonymous({Prefix='player '}); assert(p:GetName()=='player 1')
+p:Restore(); p:SetOptions({Enabled=true}); p:SetMethod('custom'); p:SetMethod('randomised')
+assert(#tasks==0 and #accountRequests==5)
+p:Destroy()
+
+-- Switching away before completion caches the result without applying it.
+p=factory(Library); yieldLookup=true; accountRequests={}
+p:SetRandomOptions({MinUserId=456,MaxUserId=456,Attempts=1})
+p:SetOptions({Enabled=true,Method='randomised'}); stepTasks()
+p:SetCustom({Name='KeepCustom'}); p:SetMethod('custom')
+drainTasks(); yieldLookup=false
+assert(p:GetRandomStatus()=='ready' and p:GetName()=='KeepCustom')
+p:SetMethod('randomised'); assert(p:GetName()=='AccountUser' and #accountRequests==1)
+p:Destroy()
+
+-- Server membership is checked again after a yielding lookup.
+p=factory(Library); yieldLookup=true
+p:SetRandomOptions({MinUserId=456,MaxUserId=456,Attempts=1})
+p:SetOptions({Enabled=true,Method='randomised'}); stepTasks()
+other.UserId=456; serverPlayers={LocalPlayer,other}
+drainTasks(); yieldLookup=false
+assert(p:GetRandomStatus()=='fallback' and p:GetUserId()==0)
+p:Destroy(); serverPlayers={LocalPlayer}
+
+-- Concurrent custom loading does not consume the random attempt or overwrite the draft.
+p=factory(Library); yieldLookup=true; accountRequests={}
+local customResult
+task.defer(function() customResult=p:LoadAccount('456') end)
+stepTasks() -- custom lookup owns the loader while yielded
+p:SetRandomOptions({MinUserId=11000000000,MaxUserId=11000000000,Attempts=1})
+p:SetOptions({Enabled=true,Method='randomised'})
+drainTasks(); yieldLookup=false
+assert(customResult.UserId==456 and p:GetUserId()==11000000000)
+assert(#accountRequests==2 and p:GetCustom().Name=='seized')
+p:Destroy()
+
+-- A failed appearance load also falls back; unload during lookup discards its work.
+p=factory(Library); appearanceFailure=true
+p:SetRandomOptions({MinUserId=456,MaxUserId=456,Attempts=1})
+p:SetOptions({Enabled=true,Method='randomised'}); drainTasks()
+assert(p:GetRandomStatus()=='fallback'); appearanceFailure=false; p:Destroy()
+p=factory(Library); yieldLookup=true; createdRigs={}
+p:SetRandomOptions({MinUserId=456,MaxUserId=456,Attempts=1})
+p:SetOptions({Enabled=true,Method='randomised'}); stepTasks(); p:Destroy(); drainTasks(); yieldLookup=false
+assert(Library.PrivacyManager==nil and #tasks==0 and #createdRigs==0)
+for _,rig in ipairs(createdRigs) do assert(rig.Parent==nil) end
+""")
+
+print("PASS: random discovery/cache/fallback/lifecycle, identity toggles, scope separation, new/live UI, literal boundaries, RichText, character appearance/respawns, restoration and cleanup")
