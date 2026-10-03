@@ -53,61 +53,6 @@ return function(Library)
         return false
     end
 
-    -- TEMPORARY: remove this diagnostic after the accessory test.
-    local diagnosticUsers = { beastskaterv8 = true, gxlaxyeu = true }
-    local diagnosticAccounts, diagnosticRendered = {}, {}
-    local function reportAccessories(id, rig, stage, model, followed, character)
-        if not diagnosticAccounts[id] then return end
-        local ok, err = pcall(function()
-            local prefix = ("[privacy accessory test] account=%s rig=%s stage=%s ")
-                :format(("%.0f"):format(id), tostring(rig), stage)
-            local head = model:FindFirstChild("Head")
-            print(prefix .. "head=" .. (head and head.ClassName or "missing")
-                .. " size=" .. tostring(head and head.Size)
-                .. " transparency=" .. tostring(head and head.Transparency))
-            local count = 0
-            for _, accessory in ipairs(model:GetChildren()) do
-                if accessory:IsA("Accessory") then
-                    count = count + 1
-                    local handle = accessory:FindFirstChild("Handle")
-                    if not handle or not handle:IsA("BasePart") then
-                        print(prefix .. "accessory=" .. accessory.Name .. " handle=missing")
-                    else
-                        local mesh = handle:FindFirstChildOfClass("SpecialMesh")
-                        local weld = handle:FindFirstChild("AccessoryWeld")
-                        local anchor = weld and weld.Part1
-                        local attachments = {}
-                        for _, child in ipairs(handle:GetChildren()) do
-                            if child:IsA("Attachment") then
-                                table.insert(attachments, child.Name .. "@" .. tostring(child.Position))
-                            end
-                        end
-                        local follow
-                        for _, record in ipairs(followed or {}) do
-                            if record.part == handle then follow = record; break end
-                        end
-                        local target = follow and character:FindFirstChild(follow.name)
-                        print(prefix .. "accessory=" .. accessory.Name
-                            .. " size=" .. tostring(handle.Size)
-                            .. " transparency=" .. tostring(handle.Transparency)
-                            .. " localTransparency=" .. tostring(handle.LocalTransparencyModifier)
-                            .. " mesh=" .. tostring(mesh and mesh.MeshId or handle:IsA("MeshPart") and handle.MeshId)
-                            .. " meshScale=" .. tostring(mesh and mesh.Scale)
-                            .. " weldTarget=" .. (anchor and anchor.Name or "missing")
-                            .. " attachments=" .. table.concat(attachments, ",")
-                            .. " followTarget=" .. (follow and follow.name or "unregistered")
-                            .. " targetExists=" .. tostring(target ~= nil)
-                            .. " offset=" .. tostring(follow and follow.offset
-                                or anchor and anchor:IsA("BasePart") and anchor.CFrame:ToObjectSpace(handle.CFrame))
-                            .. " position=" .. tostring(handle.Position))
-                    end
-                end
-            end
-            print(prefix .. "accessoryCount=" .. count)
-        end)
-        if not ok then warn("[privacy accessory test] diagnostic failed: " .. tostring(err)) end
-    end
-
     -- Loading returns draft data; it does not activate privacy or replace the current identity.
     function manager:LoadAccount(account)
         assert(self.Alive, "PrivacyManager is destroyed")
@@ -123,7 +68,6 @@ return function(Library)
             local info = game:GetService("UserService"):GetUserInfosByUserIdsAsync({ id })[1]
             assert(self.Alive, "PrivacyManager was destroyed while loading")
             assert(info and info.Username and info.DisplayName, "account details unavailable")
-            diagnosticAccounts[id] = diagnosticUsers[info.Username:lower()] == true
             if not accounts[id] then
                 local description = Players:GetHumanoidDescriptionFromUserIdAsync(id)
                 table.insert(temporary, description)
@@ -134,7 +78,6 @@ return function(Library)
                     table.insert(temporary, rig)
                     assert(self.Alive, "PrivacyManager was destroyed while loading")
                     rigs[kind] = rig
-                    reportAccessories(id, kind, "generated", rig)
                 end
                 assert(self.Alive, "PrivacyManager was destroyed while loading")
                 accounts[id] = rigs
@@ -620,14 +563,37 @@ return function(Library)
                     accountKey, accountParts = key, {}
                     for _, node in ipairs(accountVisual:GetDescendants()) do
                         if node:IsA("BasePart") then
-                            local anchor = node
+                            local anchor, offset = node, CFrame.new()
                             if node.Parent:IsA("Accessory") then
+                                anchor, offset = nil, nil
                                 local weld = node:FindFirstChild("AccessoryWeld")
-                                anchor = weld and weld.Part1
+                                if weld and weld:IsA("JointInstance") then
+                                    -- Part0 * C0 = Part1 * C1. Generated handle world
+                                    -- positions may still be unassembled; use joint offsets.
+                                    if weld.Part0 == node then
+                                        anchor, offset = weld.Part1, weld.C1 * weld.C0:Inverse()
+                                    elseif weld.Part1 == node then
+                                        anchor, offset = weld.Part0, weld.C0 * weld.C1:Inverse()
+                                    end
+                                end
+                                if not anchor or not anchor:IsA("BasePart") or anchor.Parent ~= accountVisual then
+                                    anchor, offset = nil, nil
+                                    for _, attachment in ipairs(node:GetChildren()) do
+                                        if attachment:IsA("Attachment") then
+                                            for _, part in ipairs(accountVisual:GetChildren()) do
+                                                local target = part:IsA("BasePart") and part:FindFirstChild(attachment.Name)
+                                                if target and target:IsA("Attachment") then
+                                                    anchor, offset = part, target.CFrame * attachment.CFrame:Inverse()
+                                                    break
+                                                end
+                                            end
+                                            if anchor then break end
+                                        end
+                                    end
+                                end
                             end
-                            if anchor and anchor:IsA("BasePart") then
-                                table.insert(accountParts, { part = node, name = anchor.Name,
-                                    offset = anchor.CFrame:ToObjectSpace(node.CFrame) })
+                            if anchor and offset then
+                                table.insert(accountParts, { part = node, name = anchor.Name, offset = offset })
                             end
                             node.Anchored = true
                             node.CanCollide, node.CanTouch, node.CanQuery = false, false, false
@@ -648,10 +614,6 @@ return function(Library)
                     end
                 end
                 syncHeads()
-                if not isPreview and diagnosticAccounts[identity.AccountId] and not diagnosticRendered[key] and accountVisual then
-                    diagnosticRendered[key] = true
-                    reportAccessories(identity.AccountId, kind, "displayed", accountVisual, accountParts, character)
-                end
                 return
             end
             clearAccountVisual()

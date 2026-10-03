@@ -25,8 +25,22 @@ end
 Vector2={zero="zero vector"}
 Enum={HumanoidRigType={R6="R6",R15="R15"},HumanoidDisplayDistanceType={None="None"},NormalId={Front="Front"},Material={SmoothPlastic="SmoothPlastic"},MeshType={Head="Head"}}
 Vector3={new=function(x,y,z) return {X=x,Y=y,Z=z} end,zero={X=0,Y=0,Z=0}}
-local cfMeta={__mul=function(a,b) return b end}
-function cf(...) return setmetatable({position={...},ToObjectSpace=function(_,v) return v end},cfMeta) end
+local cfMeta={}
+function cf(x,y,z,angle)
+ local t={position={x or 0,y or 0,z or 0},angle=angle or 0}
+ function t:Inverse()
+  local c,s=math.cos(self.angle),math.sin(self.angle)
+  local p=self.position
+  return cf(-c*p[1]-s*p[3],-p[2],s*p[1]-c*p[3],-self.angle)
+ end
+ function t:ToObjectSpace(v) return self:Inverse()*v end
+ return setmetatable(t,cfMeta)
+end
+cfMeta.__mul=function(a,b)
+ local c,s=math.cos(a.angle),math.sin(a.angle)
+ return cf(a.position[1]+c*b.position[1]-s*b.position[3],a.position[2]+b.position[2],
+  a.position[3]+s*b.position[1]+c*b.position[3],a.angle+b.angle)
+end
 CFrame={new=cf,lookAt=function(a,b) return {eye=a,target=b} end}
 UDim2={fromScale=function(x,y) return {x=x,y=y} end}
 Color3={fromRGB=function(r,g,b) return r .. "," .. g .. "," .. b end}
@@ -43,6 +57,7 @@ function signal()
  return s
 end
 nodes={}
+local propsByNode={}
 function node(class,parent,text)
  local props={CFrame=CFrame.new(),ClassName=class,Text=text or '',Image='',RichText=false,Transparency=0,LocalTransparencyModifier=0,ImageTransparency=0,ZIndex=1,BackgroundColor3='original background',BackgroundTransparency=1,ImageColor3='original tint',ImageRectOffset='original offset',ImageRectSize='original rect'}
  local events={Destroying=signal(),AncestryChanged=signal(),DescendantAdded=signal(),ChildAdded=signal(),CharacterAdded=signal(),CharacterRemoving=signal()}
@@ -54,15 +69,24 @@ function node(class,parent,text)
  function methods:GetAttributeChangedSignal(k) attributeSignals[k]=attributeSignals[k] or signal(); return attributeSignals[k] end
  function methods:SetAttribute(k,v) attributes[k]=v; self:GetAttributeChangedSignal(k):Fire() end
  function methods:Clone()
-  local copy=node(props.ClassName)
-  for k,v in pairs(props) do if k~='Parent' and k~='dead' then copy[k]=v end end
-  for _,child in ipairs(self:GetChildren()) do child:Clone().Parent=copy end
-  return copy
+  local copies={}
+  local function copyTree(original)
+   local source=propsByNode[original]
+   local copy=node(source.ClassName); copies[original]=copy
+   for k,v in pairs(source) do if k~='Parent' and k~='dead' then copy[k]=v end end
+   for _,child in ipairs(original:GetChildren()) do copyTree(child).Parent=copy end
+   return copy
+  end
+  local root=copyTree(self)
+  for original,copy in pairs(copies) do
+   for k,v in pairs(propsByNode[original]) do if copies[v] then copy[k]=copies[v] end end
+  end
+  return root
  end
  function methods:FindFirstChild(name)
   for _,v in ipairs(self:GetChildren()) do if v.Name==name then return v end end
  end
- function methods:IsA(c) return props.ClassName==c or (c=="BasePart" and (props.ClassName=="Part" or props.ClassName=="MeshPart")) end
+ function methods:IsA(c) return props.ClassName==c or (c=="JointInstance" and props.ClassName=="Weld") or (c=="BasePart" and (props.ClassName=="Part" or props.ClassName=="MeshPart")) end
  function methods:GetPropertyChangedSignal(k) changed[k]=changed[k] or signal(); return changed[k] end
  function methods:IsDescendantOf(root)
   local p=props.Parent; while p do if p==root then return true end; p=p.Parent end; return false
@@ -98,7 +122,7 @@ function node(class,parent,text)
    end
   end,
  })
- nodes[#nodes+1]=n; n.Parent=parent; return n
+ nodes[#nodes+1]=n; propsByNode[n]=props; n.Parent=parent; return n
 end
 Instance={new=function(class) return node(class) end}
 LocalPlayer=node('Player'); LocalPlayer.Name='RealUser'; LocalPlayer.DisplayName='Real Display'; LocalPlayer.UserId=123
@@ -126,6 +150,24 @@ function Players:CreateHumanoidModelFromDescriptionAsync(description,kind)
  local head=node('Part',model); head.Name='Head'; head.Color='loaded skin'
  local torso=node('Part',model); torso.Name='Torso'; torso.Color='loaded skin'
  local shirt=node('Shirt',model); shirt.ShirtTemplate='loaded shirt'
+ -- Unassembled handles deliberately sit far away from the rig body.
+ local function accessory(name,weldMode)
+  local acc=node('Accessory',model); acc.Name=name
+  local part=node('Part',acc); part.Name='Handle'; part.CFrame=CFrame.new(454,-10,-75)
+  local mesh=node('SpecialMesh',part); mesh.Scale=Vector3.new(13,13,12)
+  if weldMode then
+   local weld=node('Weld',part); weld.Name='AccessoryWeld'
+   if weldMode=='normal' then
+    weld.Part0=part; weld.Part1=head; weld.C0=CFrame.new(1,0.2,0); weld.C1=cf(0,0.7,0,math.pi/2)
+   else
+    weld.Part0=head; weld.Part1=part; weld.C0=cf(0,0.8,0,-math.pi/2); weld.C1=CFrame.new(1,0.2,0)
+   end
+  else
+   local a=node('Attachment',part); a.Name='HatAttachment'; a.CFrame=CFrame.new(1,0.1,0)
+  end
+ end
+ local attachment=node('Attachment',head); attachment.Name='HatAttachment'; attachment.CFrame=cf(0,0.9,0,math.pi)
+ accessory('Hair','normal'); accessory('ScaledHead','reverse'); accessory('WithoutWeld')
  node('JointInstance',model); node('Constraint',model)
  return model
 end
@@ -440,6 +482,18 @@ assert(not loadedVisual:FindFirstChildOfClass('JointInstance') and not loadedVis
 local actualHumanoid=LocalPlayer.Character:FindFirstChildOfClass('Humanoid')
 if actualHumanoid then assert(actualHumanoid.EvaluateStateMachine~=false) end
 assert(loadedVisual:FindFirstChild('Head').Color=='loaded skin')
+-- Joint/attachment offsets work before generated handles assemble in Workspace.
+newBody.CFrame=CFrame.new(10,20,30); RunService.RenderStepped:Fire()
+for name,offset in pairs({Hair={0,0.5,-1,math.pi/2},ScaledHead={0,0.6,1,-math.pi/2},WithoutWeld={1,0.8,0,math.pi}}) do
+ local acc=loadedVisual:FindFirstChild(name); local h=acc:FindFirstChild('Handle')
+ assert(math.abs(h.CFrame.position[1]-(10+offset[1]))<1e-6)
+ assert(math.abs(h.CFrame.position[2]-(20+offset[2]))<1e-6)
+ assert(math.abs(h.CFrame.position[3]-(30+offset[3]))<1e-6)
+ assert(math.abs(h.CFrame.angle-offset[4])<1e-6)
+ assert(h:FindFirstChildOfClass('SpecialMesh').Scale.X==13)
+ assert(not h:FindFirstChild('AccessoryWeld')) -- offsets captured before joint removal
+end
+
 p:SetCustom({UserId=999}) -- numeric text override does not change the selected account appearance
 assert(p:GetUserId()==999 and p:GetAvatar():find('id=456',1,true))
 p:Restore(); assert(loadedVisual.Parent==nil and avatar.Image==bust)
